@@ -49,6 +49,14 @@ const meters = computed(() => {
   ]
 })
 
+const period = computed(() => {
+  const p = props.node.netPeriod
+  const used = p.rx + p.tx
+  const quota = props.node.netQuotaBytes
+  const pct = quota ? percent(used, quota) : 0
+  return { ...p, used, quota, pct, tone: meterTone(pct) }
+})
+
 const rx = computed(() => bytesParts(rt.value.rxRate))
 const tx = computed(() => bytesParts(rt.value.txRate))
 
@@ -129,6 +137,15 @@ function onMenu({ key }: { key: string | number }) {
       <div v-else class="offline-note">
         <p>离线</p>
         <span class="muted">最后在线 {{ ago(node.lastSeenAt) }}</span>
+      </div>
+
+      <div class="period">
+        <div class="p-line">
+          <span class="m-label mono">本期</span>
+          <span class="mono p-val">↓{{ bytes(period.rx) }} ↑{{ bytes(period.tx) }}</span>
+          <span v-if="period.quota" class="mono muted p-quota">{{ bytes(period.used) }} / {{ bytes(period.quota) }}</span>
+        </div>
+        <div v-if="period.quota" class="bar"><i :class="period.tone" :style="{ width: `${period.pct}%` }" /></div>
       </div>
 
       <footer class="foot">
@@ -373,6 +390,24 @@ h3 {
   font-size: 11px;
   color: var(--text-3);
   margin-top: 2px;
+}
+
+.period {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.p-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.p-quota {
+  margin-left: auto;
+  font-size: 11px;
 }
 
 .offline-note {

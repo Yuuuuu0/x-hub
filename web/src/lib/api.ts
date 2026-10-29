@@ -97,6 +97,9 @@ export interface NodeItem {
   appliedRev: number
   syncError: string
   syncState: SyncState
+  netResetDay: number
+  netQuotaBytes: number
+  netPeriod: { start: number; rx: number; tx: number }
   runtime: {
     online: boolean
     connectedAt: number
@@ -135,6 +138,7 @@ export interface AllSettings {
   xray: XraySettings
   security: SecuritySettings
   subscription: SubscriptionSettings
+  stats: StatsSettings
   selfSignedFingerprint?: string
 }
 
@@ -217,7 +221,20 @@ export interface Subscription {
   expireAt: number
   usedUp: number
   usedDown: number
+  resetDay: number
+  periodStartAt: number
+  onlineIps: string[]
   createdAt: number
+}
+
+export interface StatsSettings {
+  timezone: string
+  retentionDays: number
+}
+
+export interface SubTraffic {
+  daily: { day: string; up: number; down: number }[]
+  byInbound: { nodeId: number; inboundId: number; nodeName: string; remark: string; deleted: boolean; up: number; down: number }[]
 }
 
 export interface SubscriptionSettings {

@@ -82,6 +82,13 @@ body {
   color: var(--text-3);
 }
 
+/* 深色下 Segmented 选中项与轨道同色，需提亮以区分当前选项。 */
+:root[data-theme='dark'] .ant-segmented-item-selected,
+:root[data-theme='dark'] .ant-segmented-thumb {
+  background: #2a2f3a;
+  color: #eef0f3;
+}
+
 ::selection {
   background: var(--lime);
   color: var(--ink);

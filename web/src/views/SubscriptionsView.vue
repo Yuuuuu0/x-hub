@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
-import { ChevronDown, KeyRound, Link2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { BarChart3, ChevronDown, KeyRound, Link2, MonitorSmartphone, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { api, type InboundItem, type Subscription } from '../lib/api'
 import { datetime } from '../lib/format'
 import SubLinkModal from '../components/SubLinkModal.vue'
+import SubDetailDrawer from '../components/SubDetailDrawer.vue'
+import UsageMeter from '../components/UsageMeter.vue'
+
+const GB = 1024 ** 3
+const RESET_DAYS = [{ value: 0, label: '不自动重置' }, ...Array.from({ length: 28 }, (_, i) => ({ value: i + 1, label: `每月 ${i + 1} 日` }))]
 
 const subs = ref<Subscription[]>([])
 const loaded = ref(false)
@@ -13,7 +18,18 @@ const busy = ref<Record<number, boolean>>({})
 const inbounds = ref<InboundItem[]>([])
 const showForm = ref(false)
 const editing = ref<Subscription | null>(null)
-const form = reactive({ name: '', note: '', allInbounds: true, inboundIds: [] as number[] })
+const form = reactive({
+  name: '',
+  note: '',
+  allInbounds: true,
+  inboundIds: [] as number[],
+  limitGB: 0,
+  expire: undefined as string | undefined, // Unix 秒字符串（date-picker valueFormat=X）
+  resetDay: 0,
+})
+const detailSub = ref<Subscription | null>(null)
+const showDetail = ref(false)
+let timer: number | undefined
 const saving = ref(false)
 const linkSub = ref<Subscription | null>(null)
 const showLink = ref(false)
@@ -43,7 +59,16 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  timer = window.setInterval(() => !document.hidden && !showForm.value && load(), 10000)
+})
+onBeforeUnmount(() => clearInterval(timer))
+
+function openDetail(s: Subscription) {
+  detailSub.value = s
+  showDetail.value = true
+}
 
 function openForm(s: Subscription | null) {
   editing.value = s
@@ -51,6 +76,9 @@ function openForm(s: Subscription | null) {
   form.note = s?.note ?? ''
   form.allInbounds = s?.allInbounds ?? true
   form.inboundIds = [...(s?.inboundIds ?? [])]
+  form.limitGB = s ? +(s.limitBytes / GB).toFixed(2) : 0
+  form.expire = s?.expireAt ? String(s.expireAt) : undefined
+  form.resetDay = s?.resetDay ?? 0
   showForm.value = true
 }
 
@@ -69,9 +97,18 @@ async function save() {
     return
   }
   saving.value = true
+  const body = {
+    name: form.name,
+    note: form.note,
+    allInbounds: form.allInbounds,
+    inboundIds: form.inboundIds,
+    limitBytes: Math.round((form.limitGB || 0) * GB),
+    expireAt: form.expire ? Number(form.expire) : 0,
+    resetDay: form.resetDay,
+  }
   try {
-    if (editing.value) await api.put(`subscriptions/${editing.value.id}`, { ...form, enabled: editing.value.enabled })
-    else await api.post('subscriptions', form)
+    if (editing.value) await api.put(`subscriptions/${editing.value.id}`, { ...body, enabled: editing.value.enabled })
+    else await api.post('subscriptions', body)
     showForm.value = false
     message.success('已保存，正在同步到各服务器')
     load()
@@ -171,18 +208,27 @@ function remove(s: Subscription) {
           </div>
           <a-switch :checked="s.enabled" :loading="busy[s.id]" @change="(v: any) => toggle(s, !!v)" />
         </header>
+        <UsageMeter :sub="s" />
         <dl class="meta">
+          <dt>在线</dt>
+          <dd>
+            <a-tooltip v-if="s.onlineIps.length" :title="s.onlineIps.join('、')">
+              <span class="online"><MonitorSmartphone :size="13" />{{ s.onlineIps.length }} 个设备</span>
+            </a-tooltip>
+            <span v-else class="muted">无</span>
+          </dd>
+          <dt>到期</dt>
+          <dd class="mono">{{ s.expireAt ? datetime(s.expireAt) : '永不' }}</dd>
           <dt>UUID</dt>
           <dd class="mono">
             <a-typography-text :copyable="{ text: s.uuid }">{{ s.uuid }}</a-typography-text>
           </dd>
           <dt>范围</dt>
           <dd>{{ scopeText(s) }}</dd>
-          <dt>创建于</dt>
-          <dd class="mono">{{ datetime(s.createdAt) }}</dd>
         </dl>
         <footer class="acts">
           <a-button size="small" type="primary" @click="openLink(s)"><Link2 :size="13" class="ico" />订阅链接</a-button>
+          <a-button size="small" @click="openDetail(s)"><BarChart3 :size="13" class="ico" />流量</a-button>
           <a-button size="small" @click="openForm(s)"><Pencil :size="13" class="ico" />编辑</a-button>
           <a-dropdown trigger="click">
             <a-button size="small">重置<ChevronDown :size="13" class="ico-r" /></a-button>
@@ -215,9 +261,21 @@ function remove(s: Subscription) {
         <a-form-item v-if="!form.allInbounds" label="可使用的入站">
           <a-select v-model:value="form.inboundIds" mode="multiple" :options="inboundOptions" placeholder="选择入站" not-found-content="还没有入站" />
         </a-form-item>
+        <div class="row">
+          <a-form-item label="流量上限（GB）" extra="0 表示不限；上下行合计，超出后自动停用。">
+            <a-input-number v-model:value="form.limitGB" :min="0" :step="10" class="full" />
+          </a-form-item>
+          <a-form-item label="流量重置">
+            <a-select v-model:value="form.resetDay" :options="RESET_DAYS" />
+          </a-form-item>
+        </div>
+        <a-form-item label="到期时间" extra="留空表示永不到期；到期后自动停用。">
+          <a-date-picker v-model:value="form.expire" show-time value-format="X" format="YYYY-MM-DD HH:mm" class="full" placeholder="永不到期" />
+        </a-form-item>
       </a-form>
     </a-modal>
     <SubLinkModal v-model:open="showLink" :sub="linkSub" />
+    <SubDetailDrawer v-model:open="showDetail" :sub="detailSub && (subs.find((x) => x.id === detailSub!.id) ?? detailSub)" @changed="load" />
   </section>
 </template>
 
@@ -317,6 +375,7 @@ h3 {
 }
 .acts {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: auto;
   padding-top: 14px;
@@ -334,6 +393,21 @@ h3 {
 }
 .ico-r {
   margin-left: 4px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 14px;
+}
+.full {
+  width: 100%;
+}
+.online {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ok);
+  cursor: help;
 }
 .mi {
   display: inline-flex;

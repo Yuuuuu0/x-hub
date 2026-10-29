@@ -33,6 +33,8 @@ const releases = ref<Release[]>([])
 const releasesLoading = ref(false)
 
 const subSettings = reactive({ path: '', updateHours: 12, nameTemplate: '' })
+const statsSettings = reactive({ timezone: 'Asia/Shanghai', retentionDays: 90 })
+const TIMEZONES = ['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'UTC'].map((value) => ({ value }))
 const namePreview = computed(() =>
   subSettings.nameTemplate.replace(/\{node\}/g, '东京-01').replace(/\{remark\}/g, '主力').replace(/\{port\}/g, '443').replace(/\s+/g, ' ').trim(),
 )
@@ -40,7 +42,7 @@ const namePreview = computed(() =>
 const sessionHours = ref(168)
 const account = reactive({ username: '', currentPassword: '', newPassword: '', confirm: '' })
 
-const saving = reactive({ access: false, xray: false, security: false, account: false, sub: false })
+const saving = reactive({ access: false, xray: false, security: false, account: false, sub: false, stats: false })
 
 async function load() {
   const s = await api.get<AllSettings>('settings')
@@ -52,6 +54,7 @@ async function load() {
   xray.maxVersion = s.xray.maxVersion || undefined
   sessionHours.value = s.security.sessionHours
   Object.assign(subSettings, s.subscription)
+  Object.assign(statsSettings, s.stats)
   account.username = session.username
   loaded.value = true
 }
@@ -83,6 +86,18 @@ function randomString(n: number) {
 
 function randomPath() {
   access.panelPath = randomString(12)
+}
+
+async function saveStats() {
+  saving.stats = true
+  try {
+    Object.assign(statsSettings, await api.put('settings/stats', statsSettings))
+    message.success('统计设置已保存')
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    saving.stats = false
+  }
 }
 
 async function saveSub() {
@@ -318,6 +333,23 @@ async function saveAccount() {
           </div>
           <div class="actions">
             <a-button type="primary" size="large" html-type="submit" :loading="saving.sub">保存订阅设置</a-button>
+          </div>
+        </a-form>
+      </a-tab-pane>
+
+      <a-tab-pane key="stats" tab="统计">
+        <a-form layout="vertical" class="form" @submit.prevent="saveStats">
+          <div class="group">
+            <h2>流量统计</h2>
+            <a-form-item label="统计时区" extra="决定按天汇总、每月流量重置与图表日期的分界。填写 IANA 时区名。">
+              <a-auto-complete v-model:value="statsSettings.timezone" :options="TIMEZONES" class="mono" />
+            </a-form-item>
+            <a-form-item label="小时明细保留天数" extra="超过后按天汇总，图表与用量不受影响，只是不再保留小时粒度。">
+              <a-input-number v-model:value="statsSettings.retentionDays" :min="7" :max="3650" class="num" />
+            </a-form-item>
+          </div>
+          <div class="actions">
+            <a-button type="primary" size="large" html-type="submit" :loading="saving.stats">保存统计设置</a-button>
           </div>
         </a-form>
       </a-tab-pane>
