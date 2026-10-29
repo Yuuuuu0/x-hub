@@ -142,3 +142,30 @@ func TestNodeNameVars(t *testing.T) {
 		t.Fatalf("name: %q", got)
 	}
 }
+
+// TestSubscriptionExcludeScope 覆盖「全部入站，排除指定入站」：订阅输出与下发到入站的用户都不含被排除的入站。
+func TestSubscriptionExcludeScope(t *testing.T) {
+	h := newTestHandler(t)
+	n1, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	i1 := addInbound(t, h, n1, 443, "主力")
+	i2 := addInbound(t, h, n1, 8443, "备用")
+	subID, _ := CreateSubscription(h.Store, "朋友A", "")
+	if err := h.Store.SetSubscriptionScope(subID, true, []int64{i1}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := h.Store.GetSubscription(subID)
+	plain, _ := base64.StdEncoding.DecodeString(fetchSub(h, s.Token, "", "").Body.String())
+	if strings.Count(string(plain), "vless://") != 1 || !strings.Contains(string(plain), ":8443") {
+		t.Fatalf("excluded inbound leaked: %s", plain)
+	}
+	for id, want := range map[int64]int{i1: 0, i2: 1} {
+		if subs, _ := h.Store.InboundSubscriptions(id); len(subs) != want {
+			t.Fatalf("inbound %d users: got %d, want %d", id, len(subs), want)
+		}
+	}
+	// 切回全部入站后排除列表清空。
+	h.Store.SetSubscriptionScope(subID, true, nil)
+	if subs, _ := h.Store.InboundSubscriptions(i1); len(subs) != 1 {
+		t.Fatal("scope reset failed")
+	}
+}

@@ -88,7 +88,7 @@ type subInput struct {
 	Note        string  `json:"note"`
 	Enabled     bool    `json:"enabled"`
 	AllInbounds *bool   `json:"allInbounds"`
-	InboundIDs  []int64 `json:"inboundIds"`
+	InboundIDs  []int64 `json:"inboundIds"` // AllInbounds 为假时是授权的入站，为真时是排除的入站
 	LimitBytes  *int64  `json:"limitBytes"`
 	ExpireAt    *int64  `json:"expireAt"`
 	ResetDay    *int    `json:"resetDay"`
@@ -167,8 +167,8 @@ func (h *Handler) createSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := CreateSubscription(h.Store, in.Name, in.Note)
-	if err == nil && in.AllInbounds != nil && !*in.AllInbounds {
-		err = h.Store.SetSubscriptionScope(id, false, in.InboundIDs)
+	if err == nil && in.AllInbounds != nil {
+		err = h.Store.SetSubscriptionScope(id, *in.AllInbounds, in.InboundIDs)
 	}
 	if err == nil {
 		err = h.applyQuota(id, &in)

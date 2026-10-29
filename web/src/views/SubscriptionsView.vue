@@ -24,7 +24,7 @@ const editing = ref<Subscription | null>(null)
 const form = reactive({
   name: '',
   note: '',
-  allInbounds: true,
+  scope: 'all' as 'all' | 'include' | 'exclude', // 全部 / 指定 / 全部但排除指定
   inboundIds: [] as number[],
   limitGB: 0,
   expire: undefined as string | undefined, // Unix 秒字符串（date-picker valueFormat=X）
@@ -75,7 +75,7 @@ function openForm(s: Subscription | null) {
   editing.value = s
   form.name = s?.name ?? ''
   form.note = s?.note ?? ''
-  form.allInbounds = s?.allInbounds ?? true
+  form.scope = !s || s.allInbounds ? (s?.inboundIds.length ? 'exclude' : 'all') : 'include'
   form.inboundIds = [...(s?.inboundIds ?? [])]
   form.limitGB = s ? +(s.limitBytes / GB).toFixed(2) : 0
   form.expire = s?.expireAt ? String(s.expireAt) : undefined
@@ -90,11 +90,12 @@ function openLink(s: Subscription) {
 }
 
 function scopeText(s: Subscription) {
-  return s.allInbounds ? '全部入站' : `${s.inboundIds.length} 个入站`
+  if (!s.allInbounds) return `${s.inboundIds.length} 个入站`
+  return s.inboundIds.length ? `全部入站（排除 ${s.inboundIds.length} 个）` : '全部入站'
 }
 
 async function save() {
-  if (!form.allInbounds && !form.inboundIds.length) {
+  if (form.scope === 'include' && !form.inboundIds.length) {
     message.error('请至少选择一个入站，或选择「全部入站」')
     return
   }
@@ -102,8 +103,8 @@ async function save() {
   const body = {
     name: form.name,
     note: form.note,
-    allInbounds: form.allInbounds,
-    inboundIds: form.inboundIds,
+    allInbounds: form.scope !== 'include',
+    inboundIds: form.scope === 'all' ? [] : form.inboundIds,
     limitBytes: Math.round((form.limitGB || 0) * GB),
     expireAt: form.expire ? Number(form.expire) : 0,
     resetDay: form.resetDay,
@@ -255,13 +256,14 @@ function remove(s: Subscription) {
         <a-form-item label="备注">
           <a-textarea v-model:value="form.note" :maxlength="200" :auto-size="{ minRows: 2, maxRows: 4 }" />
         </a-form-item>
-        <a-form-item label="入站范围" extra="「全部入站」会自动包含之后新建的入站。">
-          <a-radio-group v-model:value="form.allInbounds" button-style="solid">
-            <a-radio-button :value="true">全部入站</a-radio-button>
-            <a-radio-button :value="false">指定入站</a-radio-button>
+        <a-form-item label="入站范围" extra="「全部入站」与「排除指定入站」会自动包含之后新建的入站。">
+          <a-radio-group v-model:value="form.scope" button-style="solid" @change="form.inboundIds = []">
+            <a-radio-button value="all">全部入站</a-radio-button>
+            <a-radio-button value="include">指定入站</a-radio-button>
+            <a-radio-button value="exclude">排除指定入站</a-radio-button>
           </a-radio-group>
         </a-form-item>
-        <a-form-item v-if="!form.allInbounds" label="可使用的入站">
+        <a-form-item v-if="form.scope !== 'all'" :label="form.scope === 'include' ? '可使用的入站' : '不可使用的入站'">
           <a-select v-model:value="form.inboundIds" mode="multiple" :options="inboundOptions" placeholder="选择入站" not-found-content="还没有入站" />
         </a-form-item>
         <div class="row">

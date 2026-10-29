@@ -141,7 +141,7 @@ func FormatRemaining(b int64) string {
 	return ""
 }
 
-// Collect 收集订阅可用的节点：入站已启用、在订阅范围内、服务器已设置公网地址。名称重复时追加序号。
+// Collect 收集订阅可用的节点：入站已启用、在订阅范围内（未被排除或被授权）、服务器已设置公网地址。名称重复时追加序号。
 // vars 返回各服务器的名称变量。
 func Collect(st *store.Store, s *store.Subscription, nameTemplate string, vars func(*store.Node) NameVars) ([]Node, error) {
 	nodes, err := st.ListNodes()
@@ -152,15 +152,14 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string, vars f
 	for _, n := range nodes {
 		byID[n.ID] = n
 	}
-	allowed := map[int64]bool{}
-	if !s.AllInbounds {
-		ids, err := st.SubscriptionInboundIDs()
-		if err != nil {
-			return nil, err
-		}
-		for _, id := range ids[s.ID] {
-			allowed[id] = true
-		}
+	// 关联的入站：仅限模式下为授权的入站，全部入站模式下为排除的入站。
+	listed := map[int64]bool{}
+	ids, err := st.SubscriptionInboundIDs()
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids[s.ID] {
+		listed[id] = true
 	}
 	inbounds, err := st.ListInbounds()
 	if err != nil {
@@ -171,7 +170,7 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string, vars f
 	// 按服务器排序输出，与面板展示一致。
 	for _, n := range nodes {
 		for _, in := range inbounds {
-			if in.NodeID != n.ID || !in.Enabled || (!s.AllInbounds && !allowed[in.ID]) {
+			if in.NodeID != n.ID || !in.Enabled || s.AllInbounds == listed[in.ID] {
 				continue
 			}
 			spec, err := model.ParseSpec(in.Protocol, in.Spec)

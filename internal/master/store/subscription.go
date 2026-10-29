@@ -62,7 +62,7 @@ func (s *Store) ResetSubscriptionToken(id int64, token string) error {
 	return s.execOne("UPDATE subscriptions SET token = ? WHERE id = ?", token, id)
 }
 
-// SubscriptionInboundIDs 返回各订阅被单独授权的入站 ID。
+// SubscriptionInboundIDs 返回各订阅关联的入站 ID：AllInbounds 为假时是授权的入站，为真时是排除的入站。
 func (s *Store) SubscriptionInboundIDs() (map[int64][]int64, error) {
 	rows, err := s.db.Query("SELECT sub_id, inbound_id FROM subscription_inbounds ORDER BY sub_id, inbound_id")
 	if err != nil {
@@ -80,7 +80,7 @@ func (s *Store) SubscriptionInboundIDs() (map[int64][]int64, error) {
 	return out, rows.Err()
 }
 
-// SetSubscriptionScope 设置订阅的入站范围：覆盖全部入站，或仅限 inboundIDs。
+// SetSubscriptionScope 设置订阅的入站范围：all 为假时仅限 inboundIDs；为真时覆盖全部入站并排除 inboundIDs。
 func (s *Store) SetSubscriptionScope(id int64, all bool, inboundIDs []int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -97,11 +97,9 @@ func (s *Store) SetSubscriptionScope(id int64, all bool, inboundIDs []int64) err
 	if _, err := tx.Exec("DELETE FROM subscription_inbounds WHERE sub_id = ?", id); err != nil {
 		return err
 	}
-	if !all {
-		for _, iid := range inboundIDs {
-			if _, err := tx.Exec("INSERT OR IGNORE INTO subscription_inbounds (sub_id, inbound_id) SELECT ?, id FROM inbounds WHERE id = ?", id, iid); err != nil {
-				return err
-			}
+	for _, iid := range inboundIDs {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO subscription_inbounds (sub_id, inbound_id) SELECT ?, id FROM inbounds WHERE id = ?", id, iid); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()
@@ -181,11 +179,11 @@ func (s *Store) DeleteSubscription(id int64) error {
 	return s.execOne("DELETE FROM subscriptions WHERE id = ?", id)
 }
 
-// InboundSubscriptions 返回可使用该入站的有效订阅：已启用、状态正常，且覆盖全部入站或被单独授权。
+// InboundSubscriptions 返回可使用该入站的有效订阅：已启用、状态正常，且覆盖全部入站（未被排除）或被单独授权。
 func (s *Store) InboundSubscriptions(inboundID int64) ([]*Subscription, error) {
 	rows, err := s.db.Query(`SELECT `+subColumns+` FROM subscriptions s
-		WHERE s.enabled = 1 AND s.state = ? AND (s.all_inbounds = 1 OR EXISTS
-			(SELECT 1 FROM subscription_inbounds si WHERE si.sub_id = s.id AND si.inbound_id = ?))
+		WHERE s.enabled = 1 AND s.state = ? AND s.all_inbounds != EXISTS
+			(SELECT 1 FROM subscription_inbounds si WHERE si.sub_id = s.id AND si.inbound_id = ?)
 		ORDER BY s.id`, SubActive, inboundID)
 	if err != nil {
 		return nil, err
