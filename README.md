@@ -87,6 +87,17 @@ cd web && XHUB_DEV_TARGET=https://127.0.0.1:2096/<面板路径> pnpm dev
 make test           # go vet + go test + 前端类型检查
 ```
 
+## 发布
+
+推送到 `main` 会构建 `edge` 镜像；推送版本标签会构建版本镜像与 `latest`，并在 GitHub Release 附带主控与被控端程序：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+镜像同时提供 `linux/amd64` 与 `linux/arm64`。含 `-` 的标签（如 `v0.2.0-rc.1`）视为预发布，不会更新 `latest`。
+
 ## 许可证
 
 [MIT](LICENSE)
