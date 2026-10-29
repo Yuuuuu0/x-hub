@@ -1,51 +1,135 @@
 # x-hub
 
-专为个人自用与亲友轻量分享设计的**主从分离版 3x-ui**：一台主控通过 Web 表单集中管理多台 VPS 上的 [Xray-core](https://github.com/XTLS/Xray-core)，被控端无 Web 界面、无管理端口。
+一个面板管理你所有的 VPS 代理节点，并分享给朋友和家人。
 
-> v1 功能已全部完成（M1–M5），尚待真实 VPS 与客户端的长期验证。设计与验证记录见 [架构设计](docs/architecture.md)。
+x-hub 适合**自己用、顺便分给亲友**的场景：
 
-## 特性
+- **像 3x-ui 一样用表单配置节点**，不用手写 Xray JSON；
+- **只部署一个面板**：其余 VPS 只运行一个无界面的被控端，不开放任何管理端口；
+- **每人一个订阅链接**：每个朋友一份独立凭据，用了多少流量一目了然，可以限额、设到期、随时停用；
+- **没有机场那一套**：没有套餐、订单、注册和工单。
 
-- **一行命令接入**：面板生成一次性安装命令，被控端主动外连主控，无需开放任何管理端口
-- **三种访问模式**：反向代理 / 读取证书文件（自动热加载）/ 自签证书 + 公钥指纹锁定
-- **实时状态**：在线状态、CPU / 内存 / 磁盘、实时网速、累计流量
-- **Xray 管理**：自动安装默认版本、启动 / 停止 / 重启、切换版本（失败自动回滚）、崩溃自动拉起、查看日志
-- **版本管理**：版本上限、单服务器锁定版本、批量切换（失败自动回滚）
-- **账户安全**：可选 TOTP 两步验证
-- **备份恢复**：一键下载数据库快照，命令行恢复
-- **零环境变量**：业务参数均在面板「设置」中修改，切换 TLS 模式、面板路径无需重启
-- **表单式入站**：VLESS + Reality + Vision、VLESS + XHTTP + Reality、VLESS / VMess + WS + TLS、Trojan + TLS、Shadowsocks 2022；一键生成 X25519 密钥、ShortID 与 SS2022 密钥，Reality 目标网站可从服务器本机实测 TLS 1.3 / H2
-- **节点证书**：填写节点上已有证书的路径（保存前实测可读），或由被控端经 Let's Encrypt + Cloudflare DNS 自动申请与续签
-- **自动下发**：保存后主控编译配置并推送，被控端校验后替换配置并重启 Xray；离线服务器上线后自动补发，面板展示同步状态
-- **多订阅**：每个订阅独立 UUID 与订阅链接，可覆盖全部入站或指定入站；增删、停用、调整范围经 gRPC 在线生效，不重启 Xray、不中断现有连接
-- **订阅链接**：按客户端自动输出通用 Base64、Mihomo 或 sing-box 配置，附带用量 / 到期信息头
-- **单节点分享**：按订阅生成 `vless://` / `vmess://` / `trojan://` / `ss://` 链接与二维码
-- **流量统计**：按订阅 × 入站 × 小时统计，本地账本 + 序号确认，断网或主控停机期间不丢流量；订阅详情含每日趋势与各入站明细
-- **限额与到期**：订阅可设流量上限、到期时间与每月重置日，超额 / 到期自动停用、恢复后自动启用
-- **服务器流量**：按 VPS 计费周期统计网卡总流量，可设配额
-- **在线设备**：显示各订阅当前在线的来源 IP
-- **第三方客户端兼容**：一键放宽新版 Xray 的 Reality 客户端版本限制，Mihomo / Clash Verge 等可直接连接
+## 功能一览
 
-## 部署主控
+**服务器**
+- 面板生成一行命令，在 VPS 上执行即可接入；Xray 自动安装
+- 实时查看在线状态、CPU / 内存 / 磁盘、网速与本月流量
+- 一键启停、重启、切换或批量升级 Xray，可锁定版本；新版本启动失败自动回滚
+
+**节点（入站）**
+- 支持 VLESS + Reality + Vision、VLESS + XHTTP + Reality、VLESS / VMess + WS + TLS、Trojan + TLS、Shadowsocks 2022
+- 密钥、ShortID 一键生成；Reality 伪装目标可以从服务器本机实测是否可用
+- TLS 证书可以用节点上已有的证书文件，也可以由被控端通过 Cloudflare DNS 自动申请、自动续签
+- 保存后自动下发到服务器，面板显示是否同步成功
+
+**订阅（分享给谁）**
+- 每个订阅一个链接，自动适配 v2rayN / Shadowrocket、Clash Verge / Mihomo、sing-box
+- 可以覆盖全部节点，也可以只给某几个
+- 流量上限、到期时间、每月重置日；超额或到期自动停用
+- 流量按天统计，能看到每人在每个节点上的用量，以及当前在线的设备
+- 新增、停用订阅即时生效，不会打断其他人正在用的连接
+
+**其他**
+- 两步验证（TOTP）登录
+- 一键备份，命令行恢复
+
+## 准备
+
+- **一台运行主控的机器**：装有 Docker 即可，可以是其中一台 VPS
+- **要管理的 VPS**：Linux（使用 systemd），amd64 或 arm64
+- **一个域名（推荐）**：用于通过 HTTPS 访问面板；没有域名也能用，浏览器会提示证书不受信任
+
+## 快速开始
+
+### 1. 部署主控
 
 ```bash
 mkdir xhub && cd xhub
 curl -fsSLO https://raw.githubusercontent.com/Yuuuuu0/x-hub/main/deploy/docker-compose.yml
 docker compose up -d
-docker logs xhub        # 查看面板地址与初始密码
+docker logs xhub
 ```
 
-首次启动默认使用自签证书，面板路径随机生成。容器内固定监听 2096，宿主机端口被占用时修改 compose 中端口映射的左侧即可（如 `"8443:2096"`）。登录后：
+日志里会打印**面板地址**和**初始密码**，例如：
 
-1. 确认「公开访问地址」（被控端与订阅链接使用）
-2. 如有自己的证书，在 compose 中挂载证书目录，再到「设置 → 访问」切换为「证书文件」模式
-3. 在「设置 → 账户与安全」修改初始密码
+```
+ 面板地址：https://<服务器IP>:<映射的宿主机端口>/aB3dE5fG7hJ9/
+ 初始账号：admin
+ 初始密码：xxxxxxxxxxxxxxxx
+```
 
-### Nginx 反向代理
+面板地址最后那一段是随机生成的面板路径，只有带上它才能打开面板，直接访问域名根路径会显示 404。
 
-由 Nginx 终结 TLS、主控只对本机开放时，按以下步骤配置。
+compose 默认把宿主机的 2096 端口映射给主控。2096 被占用时，只需修改 `docker-compose.yml` 里端口映射的左侧，例如 `"8443:2096"`。
 
-**1. compose 端口只绑定本机**
+### 2. 选择访问方式
+
+| 方式 | 适合 | 怎么做 |
+|---|---|---|
+| **Nginx 反向代理**（推荐） | 有域名，服务器上已有 Nginx | 见下文 [Nginx 反向代理](#nginx-反向代理) |
+| 直接访问 | 先试试 / 没有域名 | 访问 `https://服务器IP:2096/面板路径/`，浏览器提示证书不安全时选择继续 |
+| 使用自己的证书文件 | 有证书但不想装 Nginx | 在 compose 中挂载证书目录，登录后在「设置 → 访问」选择「证书文件」并填写容器内路径 |
+
+### 3. 首次登录
+
+登录后会提示确认**公开访问地址**，即别人从外面访问面板用的地址（如 `https://hub.example.com`）。被控端安装命令和订阅链接都会用到它，请务必填对。
+
+接着建议：
+- 在「设置 → 账户与安全」修改初始密码，并开启两步验证；
+- 在「设置 → Xray」选择默认安装的 Xray 版本。需要兼容特定客户端时，可以设一个版本上限。
+
+### 4. 接入服务器
+
+「服务器 → 添加服务器」，填写名称后会弹出安装命令。以 root 身份在目标 VPS 上执行，几秒后服务器就会显示在线，并自动安装 Xray。
+
+> 如果用了 Nginx 反向代理，请在完成反代配置**之后**再生成安装命令。
+
+### 5. 创建节点
+
+「入站 → 新建入站」，选择服务器和协议组合：
+
+| 协议组合 | 什么时候用 |
+|---|---|
+| **VLESS + Reality + Vision** | 首选。不需要域名和证书，速度快 |
+| VLESS + XHTTP + Reality | 同样不需要证书；sing-box 客户端不支持 |
+| VLESS / VMess + WS + TLS | 需要套 Cloudflare 等 CDN 时 |
+| Trojan + TLS | 有域名和证书，习惯用 Trojan 时 |
+| Shadowsocks 2022 | 中转、内网互联等不需要伪装的场景 |
+
+Reality 节点的「**兼容第三方客户端**」开关默认开启。新版 Xray 默认会拒绝 Clash Verge、Mihomo Party、sing-box 等非 Xray 内核的客户端，关闭这个开关后这些客户端就连不上了。
+
+保存后，配置会自动下发到服务器。服务器卡片上显示「配置已同步」即表示生效。
+
+### 6. 分享给自己和朋友
+
+「订阅」页面里，每个人建一个订阅（首次启动已自动创建「自己」）：
+
+- 「订阅链接」：复制链接或扫码导入客户端，节点有变化时客户端更新订阅即可；
+- 「编辑」：设置流量上限、到期时间、每月重置日，以及能用哪些节点；
+- 「流量」：查看每天的用量，以及在各节点上的明细；
+- 开关：随时停用，对方立即无法连接；
+- 「重置 → 订阅链接」：链接泄露时使用，旧链接失效，已导入的节点仍可用；
+- 「重置 → 连接凭据」：让已导入的节点全部失效，需要重新导入。
+
+想临时测试单个节点，可以在「入站」列表点击二维码图标，复制单节点分享链接。
+
+## 客户端导入
+
+订阅链接会根据客户端自动返回对应格式，一般直接导入即可。
+
+| 客户端 | 格式 | 说明 |
+|---|---|---|
+| v2rayN / v2rayNG / Shadowrocket / NekoBox | 通用 | |
+| Clash Verge / Mihomo Party / Stash | Mihomo | 自带「节点选择」「自动选择」分组，局域网与国内直连 |
+| sing-box 官方客户端（SFA / SFI / SFM） | sing-box | 需 1.12 及以上版本；不包含 XHTTP 节点 |
+
+自动识别不准时，可以在订阅链接弹窗里切换格式，复制带 `?format=` 参数的链接。
+
+## Nginx 反向代理
+
+**1. 主控端口只对本机开放**
+
+修改 `docker-compose.yml`：
 
 ```yaml
     ports:
@@ -54,23 +138,19 @@ docker logs xhub        # 查看面板地址与初始密码
 
 **2. 把主控切换为反向代理模式**
 
-主控首次启动默认以自签证书提供 HTTPS，而 Nginx 以 HTTP 转发，需先切换（否则会看到“主控当前以 HTTPS 提供服务，但收到了明文 HTTP 请求”）：
+主控默认自己提供 HTTPS，而 Nginx 会用 HTTP 连接它，所以需要先切换：
 
 ```bash
 docker exec xhub xhub-master settings proxy --public-url https://hub.example.com
 docker restart xhub
 ```
 
-- `--public-url` 为 Nginx 对外的地址（非 443 端口需带上端口），被控端安装命令与订阅链接都会使用它。
-- 可信代理默认为 `127.0.0.1`、`::1`，在容器中另加 Docker 默认网段 `172.16.0.0/12`（经端口映射访问时主控看到的来源地址）；自定义过网段时用 `--trusted 127.0.0.1,172.20.0.0/16` 指定，网段可用 `docker network inspect` 查看。
-- 二进制部署：`xhub-master settings proxy --public-url https://hub.example.com --data <数据目录>`，然后重启主控。
+`--public-url` 填写 Nginx 对外的地址，不是 443 端口时需带上端口。
 
-> 被控端的安装命令请在切换之后再生成。自签证书模式下生成的命令会锁定主控自签证书的公钥，经 Nginx 访问时校验必然失败（`curl: (90) SSL: public key does not match pinned public key`）。
-
-**3. Nginx 配置**
+**3. 配置 Nginx**
 
 ```nginx
-# 放在 http {} 块中：仅对 WebSocket 请求发送 Connection: upgrade
+# 放在 http {} 块中
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      '';
@@ -85,12 +165,11 @@ server {
     ssl_certificate     /etc/letsencrypt/live/hub.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/hub.example.com/privkey.pem;
 
-    # 面板、订阅链接与被控端接入均由主控按路径分发，未知路径主控返回 404，整站转发即可。
     location / {
-        proxy_pass http://127.0.0.1:2096;
+        proxy_pass http://127.0.0.1:2096;   # 与 compose 中映射的宿主机端口一致
         proxy_http_version 1.1;
 
-        # 被控端通过 /agent/ws 保持 WebSocket 长连接
+        # 服务器通过 WebSocket 与主控保持连接
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
 
@@ -98,10 +177,9 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        # 主控优先采信 CF-Connecting-IP，必须清除客户端自带的该头，否则可伪造来源 IP 绕过登录限流
+        # 防止伪造来源 IP 绕过登录限制，请保留
         proxy_set_header CF-Connecting-IP "";
 
-        # 被控端每 15 秒发送心跳；首次安装 Xray 时主控需先从 GitHub 下载安装包，留足超时
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
         proxy_buffering off;
@@ -109,11 +187,16 @@ server {
 }
 ```
 
-**Nginx 前面还有 Cloudflare 橙云时**，在 `server {}` 中加入以下配置，由 Nginx 还原真实客户端 IP 后再经 `X-Real-IP` 传给主控（`CF-Connecting-IP` 仍照常清除）：
+执行 `nginx -t && nginx -s reload` 后，访问 `https://hub.example.com/面板路径/` 即可。
+
+<details>
+<summary>Nginx 前面还套了 Cloudflare（橙云）时</summary>
+
+在 `server {}` 中加入以下配置，让 Nginx 还原访客的真实 IP：
 
 ```nginx
     real_ip_header CF-Connecting-IP;
-    # Cloudflare 回源 IP 段，完整列表见 https://www.cloudflare.com/ips/
+    # Cloudflare 回源 IP 段，最新列表见 https://www.cloudflare.com/ips/
     set_real_ip_from 173.245.48.0/20;
     set_real_ip_from 103.21.244.0/22;
     set_real_ip_from 103.22.200.0/22;
@@ -138,18 +221,19 @@ server {
     set_real_ip_from 2c0f:f248::/32;
 ```
 
-此时主控的可信代理仍按第 2 步填写（Nginx 的地址），无需填入 Cloudflare 网段。
+</details>
 
-### 应急命令
+## 日常维护
+
+**更新主控**
 
 ```bash
-docker exec -it xhub xhub-master settings show          # 查看访问配置
-docker exec -it xhub xhub-master settings reset-access  # 恢复 :2096 + 自签证书 + 新面板路径（需重启容器）
-docker exec -it xhub xhub-master settings proxy --public-url https://hub.example.com  # 切换为反向代理模式（需重启容器）
-docker exec -it xhub xhub-master admin reset            # 重置管理员密码并关闭两步验证
+docker compose pull && docker compose up -d
 ```
 
-### 恢复备份
+**更新被控端**：服务器卡片「⋯ → 重装命令」，在 VPS 上重新执行即可。卡片上显示 Agent 版本与主控不一致时，就该更新了。
+
+**备份与恢复**：「设置 → 备份」下载备份文件。恢复时把文件放到 compose 的 `data` 目录下，然后执行：
 
 ```bash
 docker compose stop
@@ -157,46 +241,63 @@ docker compose run --rm xhub restore /data/xhub-backup-xxxx.db
 docker compose up -d
 ```
 
-## 接入被控端
+备份包含全部设置、节点私钥与订阅凭据，请妥善保管。服务器无需重新接入。
 
-在面板「服务器 → 添加服务器」后复制安装命令，以 root 在目标 VPS 执行即可。要求 systemd，支持 amd64 / arm64。
+**卸载被控端**：安装命令弹窗底部附有卸载命令，在 VPS 上执行即可。
 
-被控端以 `xhub` 系统用户运行（仅授予 `CAP_NET_BIND_SERVICE`），Xray 由被控端作为子进程托管：
-
-| 路径 | 内容 |
-|---|---|
-| `/usr/local/bin/xhub-agent` | 被控端程序 |
-| `/etc/xhub-agent/agent.json` | 节点凭据与主控地址 |
-| `/var/lib/xhub-agent/` | Xray 二进制、配置与状态 |
-
-日志：`journalctl -u xhub-agent -f`
-
-## 开发
-
-依赖 Go 1.26+、Node 24+、pnpm 10。
+**常用命令**
 
 ```bash
-make web            # 构建前端（嵌入主控）
-make agents         # 构建 linux/amd64、linux/arm64 被控端
-make master         # 构建主控
-./dist/xhub-master --data ./data --agents ./dist/agents
-
-# 前端热更新开发：代理到本地主控
-cd web && XHUB_DEV_TARGET=https://127.0.0.1:2096/<面板路径> pnpm dev
-
-make test           # go vet + go test + 前端类型检查
+docker exec xhub xhub-master settings show          # 查看面板路径、访问设置
+docker exec xhub xhub-master admin reset            # 忘记密码 / 两步验证丢失时重置
+docker exec xhub xhub-master settings reset-access  # 访问设置改错打不开面板时恢复默认（需重启容器）
+journalctl -u xhub-agent -f                          # 在 VPS 上查看被控端日志
 ```
 
-## 发布
+## 常见问题
 
-推送到 `main` 会构建 `edge` 镜像；推送版本标签会构建版本镜像与 `latest`，并在 GitHub Release 附带主控与被控端程序：
+**打开面板显示「主控当前以 HTTPS 提供服务，但收到了明文 HTTP 请求」**
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+前面有 Nginx 反代，但主控还没切换为反向代理模式，执行 [Nginx 反向代理](#nginx-反向代理) 第 2 步即可。
 
-镜像同时提供 `linux/amd64` 与 `linux/arm64`。含 `-` 的标签（如 `v0.2.0-rc.1`）视为预发布，不会更新 `latest`。
+**Nginx 返回 502**
+
+检查 `proxy_pass` 是否为 `http://`，端口是否与 compose 中映射的宿主机端口一致。可以在服务器上执行 `curl http://127.0.0.1:端口/`，返回 404 说明主控正常。
+
+**访问域名显示 404**
+
+这是正常的。面板地址需要带上面板路径，可以用 `docker exec xhub xhub-master settings show` 查看。
+
+**安装被控端时报 `curl: (90) SSL: public key does not match pinned public key`**
+
+这条安装命令是在切换为反向代理模式之前生成的。在面板上重新生成一次安装命令即可。
+
+**Clash Verge / Mihomo 连不上 Reality 节点**
+
+编辑节点，确认「兼容第三方客户端」已开启。
+
+**TLS 节点提示证书文件不可用**
+
+被控端以 `xhub` 用户运行，无法读取 root 才能读的证书（certbot 生成的私钥默认如此）。可以在续签脚本里把证书复制一份并 `chown xhub`，或者改用「自动申请」。
+
+**流量超额后对方还多用了一点**
+
+流量每 10~40 秒统计一次，超额停用会有这么长的延迟。
+
+**服务器卡片显示「同步失败」**
+
+把鼠标放在上面可以看到原因，修正后点击旁边的重试按钮。
+
+## 安全提示
+
+- **订阅链接等同于密码**，只发给对应的人；泄露后在订阅卡片上「重置 → 订阅链接」。
+- 面板路径相当于第二道门，不要公开。
+- 备份文件包含所有节点的私钥，不要上传到公开的地方。
+
+## 了解更多
+
+- [架构设计](docs/architecture.md)：工作原理与设计取舍
+- [开发与发布](docs/development.md)
 
 ## 许可证
 
