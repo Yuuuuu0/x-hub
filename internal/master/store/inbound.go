@@ -78,13 +78,13 @@ func (s *Store) GetInbound(id int64) (*Inbound, error) {
 // CreateInbound 新建入站，返回新 ID。
 func (s *Store) CreateInbound(in *Inbound) (int64, error) {
 	now := time.Now().Unix()
-	res, err := s.db.Exec(`INSERT INTO inbounds (node_id, remark, enabled, listen, port, protocol, spec_json, link_host, link_port, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	id, err := s.insertWithID("inbounds", `INSERT INTO inbounds (id, node_id, remark, enabled, listen, port, protocol, spec_json, link_host, link_port, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.NodeID, in.Remark, in.Enabled, in.Listen, in.Port, in.Protocol, string(in.Spec), in.LinkHost, in.LinkPort, now, now)
 	if err != nil {
 		return 0, mapConstraint(err)
 	}
-	return res.LastInsertId()
+	return id, nil
 }
 
 // UpdateInbound 更新入站的可编辑字段，所属服务器不可变。

@@ -42,6 +42,37 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
+// nextID 在事务内分配不复用的新 ID：取高水位与当前最大 ID 中较大者加一，并推进高水位。
+func nextID(tx *sql.Tx, table string) (int64, error) {
+	var last, cur int64
+	if err := tx.QueryRow("SELECT last FROM id_seq WHERE name = ?", table).Scan(&last); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	if err := tx.QueryRow("SELECT COALESCE(MAX(id), 0) FROM " + table).Scan(&cur); err != nil {
+		return 0, err
+	}
+	id := max(last, cur) + 1
+	_, err := tx.Exec("INSERT INTO id_seq (name, last) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET last = excluded.last", table, id)
+	return id, err
+}
+
+// insertWithID 在事务内分配新 ID 并执行插入，query 的第一个参数位为 id。
+func (s *Store) insertWithID(table, query string, args ...any) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	id, err := nextID(tx, table)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(query, append([]any{id}, args...)...); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
 // Close 关闭数据库。
 func (s *Store) Close() error { return s.db.Close() }
 

@@ -65,3 +65,26 @@ func TestIngestDedupAndRollup(t *testing.T) {
 		t.Fatalf("node traffic after rollup %d", rx)
 	}
 }
+
+// TestIDNeverReused 删除最大 ID 的记录后，新记录不得复用该 ID，否则历史流量会错配。
+func TestIDNeverReused(t *testing.T) {
+	st := openTest(t)
+	n1, _ := st.CreateNode("a", "", "")
+	n2, _ := st.CreateNode("b", "", "")
+	st.DeleteNode(n2)
+	if n3, _ := st.CreateNode("c", "", ""); n3 == n2 || n3 <= n1 {
+		t.Fatalf("node id reused: %d after deleting %d", n3, n2)
+	}
+	in := &Inbound{NodeID: n1, Port: 1, Protocol: "vless", Spec: []byte("{}")}
+	i1, _ := st.CreateInbound(in)
+	st.DeleteInbound(i1)
+	in.Port = 2
+	if i2, _ := st.CreateInbound(in); i2 == i1 {
+		t.Fatalf("inbound id reused: %d", i2)
+	}
+	s1, _ := st.CreateSubscription(&Subscription{Name: "s", Token: "t1", Secret: "x", UUID: "u"})
+	st.DeleteSubscription(s1)
+	if s2, _ := st.CreateSubscription(&Subscription{Name: "s", Token: "t2", Secret: "x", UUID: "u"}); s2 == s1 {
+		t.Fatalf("subscription id reused: %d", s2)
+	}
+}

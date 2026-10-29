@@ -143,13 +143,9 @@ func (s *Store) CountSubscriptions() (int, error) {
 // CreateSubscription 新建订阅，返回新 ID。
 func (s *Store) CreateSubscription(sub *Subscription) (int64, error) {
 	now := time.Now().Unix()
-	res, err := s.db.Exec(`INSERT INTO subscriptions (name, note, token, secret, uuid, enabled, state, all_inbounds, period_start_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	return s.insertWithID("subscriptions", `INSERT INTO subscriptions (id, name, note, token, secret, uuid, enabled, state, all_inbounds, period_start_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sub.Name, sub.Note, sub.Token, sub.Secret, sub.UUID, sub.Enabled, SubActive, sub.AllInbounds, now, now)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
 }
 
 // UpdateSubscription 更新名称、备注与启用状态。

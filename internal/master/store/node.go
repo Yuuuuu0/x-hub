@@ -90,12 +90,8 @@ func (s *Store) GetNode(id int64) (*Node, error) {
 
 // CreateNode 新建服务器记录，返回新 ID。
 func (s *Store) CreateNode(name, remark, publicHost string) (int64, error) {
-	res, err := s.db.Exec("INSERT INTO nodes (name, remark, public_host, created_at) VALUES (?, ?, ?, ?)",
+	return s.insertWithID("nodes", "INSERT INTO nodes (id, name, remark, public_host, created_at) VALUES (?, ?, ?, ?, ?)",
 		name, remark, publicHost, time.Now().Unix())
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
 }
 
 // UpdateNode 更新服务器的可编辑字段。
