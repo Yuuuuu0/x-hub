@@ -82,6 +82,7 @@ func Run(opts Options) error {
 		Log:           log,
 		Web:           web.Dist(),
 		DataDir:       opts.DataDir,
+		InContainer:   inContainer(),
 		AgentDir:      opts.AgentDir,
 		InstallScript: deploy.InstallScript,
 	}
@@ -95,7 +96,7 @@ func Run(opts Options) error {
 	if err := h.Server.Start(); err != nil {
 		return fmt.Errorf("监听 %s 失败：%w（可执行 settings reset-access 恢复默认访问配置）", cfg.Access().Listen, err)
 	}
-	printBanner(cfg.Access(), password)
+	printBanner(cfg.Access(), password, h.InContainer)
 	h.Syncer.TriggerAll() // 预先编译各服务器期望配置，用于同步状态展示
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -119,7 +120,13 @@ func ensureAdmin(st *store.Store) (string, error) {
 	return pw, st.CreateAdmin(defaultUsername, auth.HashPassword(pw))
 }
 
-func printBanner(a settings.Access, password string) {
+// inContainer 判断是否运行在 Docker 容器中。
+func inContainer() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
+}
+
+func printBanner(a settings.Access, password string, container bool) {
 	scheme := "https"
 	if a.TLSMode == settings.TLSProxy {
 		scheme = "http"
@@ -129,6 +136,10 @@ func printBanner(a settings.Access, password string) {
 		host, port, _ := net.SplitHostPort(a.Listen)
 		if host == "" || host == "0.0.0.0" || host == "::" {
 			host = "<服务器IP>"
+		}
+		if container {
+			// 容器内监听端口不等于对外端口，以 compose 中映射的宿主机端口为准
+			host, port = "<服务器IP>", "<映射的宿主机端口>"
 		}
 		base = fmt.Sprintf("%s://%s:%s", scheme, host, port)
 	}

@@ -262,7 +262,7 @@ var minVersion = map[Feature]Version{ /* M1 对照官方 changelog 填写 */ }
 | `file` | 证书由外部脚本续签 | 读取证书文件，握手时按 mtime 热加载 | 系统 CA |
 | `selfsigned` | 无域名 | 自动生成证书 | 安装命令带 `--fp` |
 
-- 修改监听地址、端口、TLS 模式、面板路径时：先校验（端口可绑定、证书可加载），再在进程内平滑重启 HTTP 服务，前端跳转到新地址；校验失败拒绝保存。
+- 修改监听地址、端口、TLS 模式、面板路径时（容器部署时监听地址固定，见 11.1）：先校验（端口可绑定、证书可加载），再在进程内平滑重启 HTTP 服务，前端跳转到新地址；校验失败拒绝保存。
 - `trusted_proxies`：Cloudflare / 反代场景下从 `CF-Connecting-IP` / `X-Forwarded-For` 取真实 IP。
 - Cloudflare 橙云仅代理 443 / 2053 / 2083 / 2087 / 2096 / 8443 等端口，默认端口取 2096。
 
@@ -298,7 +298,8 @@ services:
     image: ghcr.io/<owner>/xhub-master:latest
     container_name: xhub
     restart: unless-stopped
-    network_mode: host          # 面板改端口无需改映射，且能拿到真实客户端 IP
+    ports:
+      - "2096:2096"             # 宿主机端口被占用时只改左侧；前置反代时改为 "127.0.0.1:2096:2096"
     volumes:
       - ./data:/data
       # 使用自有证书时挂载证书所在目录（只读），再到「设置 → 访问」填写容器内路径。
@@ -306,6 +307,9 @@ services:
       # certbot 的 live/ 是指向 archive/ 的符号链接，需挂载整个 /etc/letsencrypt。
       # - /etc/ssl/xhub:/certs:ro
 ```
+
+- 使用端口映射而非 host 网络：容器内固定监听 2096，对外端口由映射决定，避免占用宿主机端口。主控检测到运行在容器中（`/.dockerenv`）时，面板禁止修改监听地址，提示改 compose 映射并同步公开访问地址。
+- Linux 上端口映射经 iptables DNAT，外部访问的来源 IP 照常保留，登录限流与日志不受影响。
 
 也提供二进制 + systemd 的安装方式。
 

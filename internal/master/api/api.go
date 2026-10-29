@@ -37,6 +37,7 @@ type Handler struct {
 	Log           *slog.Logger
 	Web           fs.FS  // 前端构建产物根目录
 	DataDir       string // 数据目录，备份时用于存放临时快照
+	InContainer   bool   // 运行在容器中：监听端口固定，对外端口由端口映射决定
 	AgentDir      string // 各架构被控端二进制所在目录
 	InstallScript []byte
 

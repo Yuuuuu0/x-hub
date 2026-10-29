@@ -141,6 +141,7 @@ export interface AllSettings {
   subscription: SubscriptionSettings
   stats: StatsSettings
   certs: { acmeEmail: string; cloudflareTokenSet: boolean }
+  inContainer: boolean
   selfSignedFingerprint?: string
 }
 

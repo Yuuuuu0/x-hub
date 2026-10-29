@@ -20,6 +20,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"subscription": h.Settings.Subscription(),
 		"stats":        h.Settings.Stats(),
 		"certs":        certsView(h.Settings.Certs()),
+		"inContainer":  h.InContainer,
 	}
 	if fp, err := h.Certs.SelfSigned(); err == nil {
 		out["selfSignedFingerprint"] = fp
@@ -52,6 +53,10 @@ func (h *Handler) putAccess(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var ln net.Listener
+	if h.InContainer && a.Listen != h.Server.Addr() {
+		writeError(w, http.StatusBadRequest, "容器部署时监听地址固定为 "+h.Server.Addr()+"，修改对外端口请编辑 docker-compose.yml 的端口映射")
+		return
+	}
 	if a.Listen != h.Server.Addr() {
 		var err error
 		if ln, err = h.Server.Listen(a.Listen); err != nil {

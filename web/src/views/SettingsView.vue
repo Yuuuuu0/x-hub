@@ -28,6 +28,7 @@ const access = reactive<AccessSettings>({
 })
 const proxiesText = ref('')
 let savedAccess: AccessSettings | null = null
+const inContainer = ref(false)
 
 const xray = reactive({ defaultVersion: undefined as string | undefined, maxVersion: undefined as string | undefined })
 const releases = ref<Release[]>([])
@@ -52,6 +53,7 @@ async function load() {
   const s = await api.get<AllSettings>('settings')
   Object.assign(access, s.access)
   savedAccess = { ...s.access }
+  inContainer.value = !!s.inContainer
   proxiesText.value = (s.access.trustedProxies ?? []).join('\n')
   fingerprint.value = s.selfSignedFingerprint ?? ''
   xray.defaultVersion = s.xray.defaultVersion || undefined
@@ -300,8 +302,11 @@ async function saveAccount() {
               <a-input v-model:value="access.publicUrl" class="mono" placeholder="https://hub.example.com:2096" />
             </a-form-item>
             <div class="row">
-              <a-form-item label="监听地址" extra="容器使用 host 网络时，修改后直接生效。">
-                <a-input v-model:value="access.listen" class="mono" placeholder=":2096" />
+              <a-form-item
+                label="监听地址"
+                :extra="inContainer ? '容器部署时固定不变；修改对外端口请编辑 docker-compose.yml 的端口映射，并同步修改公开访问地址。' : '修改后平滑切换，无需重启。'"
+              >
+                <a-input v-model:value="access.listen" class="mono" placeholder=":2096" :disabled="inContainer" />
               </a-form-item>
               <a-form-item label="面板路径" extra="面板只能通过该路径访问，其余路径一律 404。">
                 <a-input v-model:value="access.panelPath" class="mono" addon-before="/">
