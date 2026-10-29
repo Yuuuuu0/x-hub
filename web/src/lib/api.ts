@@ -248,6 +248,7 @@ export interface Subscription {
   usedDown: number
   resetDay: number
   periodStartAt: number
+  profileId: number
   onlineIps: string[]
   createdAt: number
 }
@@ -280,4 +281,61 @@ export interface ProbeTargetResult {
   h2: boolean
   latencyMs: number
   error?: string
+}
+
+export interface NodeFilter {
+  include: string
+  exclude: string
+  source: 'all' | 'own' | 'external'
+}
+
+export interface RouteGroup {
+  name: string
+  type: 'select' | 'url-test' | 'fallback' | 'load-balance'
+  proxies: string[]
+  nodes?: NodeFilter | null
+  url?: string
+  interval?: number
+  tolerance?: number
+  strategy?: string
+}
+
+export interface RouteRule {
+  type: string
+  value?: string
+  target?: string
+  noResolve?: boolean
+  raw?: string
+}
+
+export interface ProfileSpec {
+  groups: RouteGroup[]
+  rules: RouteRule[]
+  mihomo: { base: string }
+}
+
+export interface ProfileItem {
+  id: number
+  name: string
+  note: string
+  spec: ProfileSpec
+  users?: string[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface RuleSetItem {
+  id: number
+  name: string
+  behavior: 'domain' | 'ipcidr' | 'classical'
+  source: 'hosted' | 'url'
+  url: string
+  format: string
+  interval: number
+  content: string
+  note: string
+  hostedUrl?: string
+  rules?: number
+  profiles?: string[]
+  updatedAt: number
 }

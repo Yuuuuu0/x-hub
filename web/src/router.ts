@@ -13,6 +13,13 @@ export const router = createRouter({
         { path: 'nodes', name: 'nodes', component: () => import('./views/NodesView.vue'), meta: { title: '服务器' } },
         { path: 'inbounds', name: 'inbounds', component: () => import('./views/InboundsView.vue'), meta: { title: '入站' } },
         { path: 'subscriptions', name: 'subscriptions', component: () => import('./views/SubscriptionsView.vue'), meta: { title: '订阅' } },
+        {
+          path: 'routing',
+          children: [
+            { path: '', name: 'routing', component: () => import('./views/RoutingView.vue'), meta: { title: '分流' } },
+            { path: ':id(\\d+)', name: 'profile', component: () => import('./views/ProfileEditor.vue'), meta: { title: '分流方案' } },
+          ],
+        },
         { path: 'settings', name: 'settings', component: () => import('./views/SettingsView.vue'), meta: { title: '设置' } },
       ],
     },

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import { BarChart3, ChevronDown, KeyRound, Link2, MonitorSmartphone, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
-import { api, type InboundItem, type Subscription } from '../lib/api'
+import { api, type InboundItem, type ProfileItem, type Subscription } from '../lib/api'
 import { datetime } from '../lib/format'
 import SubLinkModal from '../components/SubLinkModal.vue'
 import SubDetailDrawer from '../components/SubDetailDrawer.vue'
@@ -16,6 +16,8 @@ const loaded = ref(false)
 const busy = ref<Record<number, boolean>>({})
 
 const inbounds = ref<InboundItem[]>([])
+const profiles = ref<ProfileItem[]>([])
+const profileOptions = computed(() => [{ value: 0, label: '内置精简方案' }, ...profiles.value.map((p) => ({ value: p.id, label: p.name }))])
 const showForm = ref(false)
 const editing = ref<Subscription | null>(null)
 const form = reactive({
@@ -26,6 +28,7 @@ const form = reactive({
   limitGB: 0,
   expire: undefined as string | undefined, // Unix 秒字符串（date-picker valueFormat=X）
   resetDay: 0,
+  profileId: 0,
 })
 const detailSub = ref<Subscription | null>(null)
 const showDetail = ref(false)
@@ -46,12 +49,14 @@ const inboundOptions = computed(() => {
 
 async function load() {
   try {
-    const [a, b] = await Promise.all([
+    const [a, b, c] = await Promise.all([
       api.get<{ subscriptions: Subscription[] }>('subscriptions'),
       api.get<{ inbounds: InboundItem[] }>('inbounds'),
+      api.get<{ profiles: ProfileItem[] }>('profiles'),
     ])
     subs.value = a.subscriptions
     inbounds.value = b.inbounds
+    profiles.value = c.profiles
   } catch (e: any) {
     message.error(e.message)
   } finally {
@@ -79,6 +84,7 @@ function openForm(s: Subscription | null) {
   form.limitGB = s ? +(s.limitBytes / GB).toFixed(2) : 0
   form.expire = s?.expireAt ? String(s.expireAt) : undefined
   form.resetDay = s?.resetDay ?? 0
+  form.profileId = s?.profileId ?? 0
   showForm.value = true
 }
 
@@ -105,6 +111,7 @@ async function save() {
     limitBytes: Math.round((form.limitGB || 0) * GB),
     expireAt: form.expire ? Number(form.expire) : 0,
     resetDay: form.resetDay,
+    profileId: form.profileId,
   }
   try {
     if (editing.value) await api.put(`subscriptions/${editing.value.id}`, { ...body, enabled: editing.value.enabled })
@@ -271,6 +278,9 @@ function remove(s: Subscription) {
         </div>
         <a-form-item label="到期时间" extra="留空表示永不到期；到期后自动停用。">
           <a-date-picker v-model:value="form.expire" show-time value-format="X" format="YYYY-MM-DD HH:mm" class="full" placeholder="永不到期" />
+        </a-form-item>
+        <a-form-item label="分流方案" extra="决定 Clash 系客户端拿到的分组与规则，可在「分流」中管理。">
+          <a-select v-model:value="form.profileId" :options="profileOptions" />
         </a-form-item>
       </a-form>
     </a-modal>

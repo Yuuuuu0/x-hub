@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { LogOut, Monitor, Moon, Network, Server, Settings, Sun, Users } from 'lucide-vue-next'
+import { LogOut, Monitor, Moon, Network, Server, Settings, Split, Sun, Users } from 'lucide-vue-next'
 import { api, session } from '../lib/api'
 import { cycleTheme, themeMode } from '../lib/theme'
 import PublicUrlModal from '../components/PublicUrlModal.vue'
@@ -11,6 +11,7 @@ const nav = [
   { name: 'nodes', label: '服务器', icon: Server },
   { name: 'inbounds', label: '入站', icon: Network },
   { name: 'subscriptions', label: '订阅', icon: Users },
+  { name: 'routing', label: '分流', icon: Split },
   { name: 'settings', label: '设置', icon: Settings },
 ]
 
