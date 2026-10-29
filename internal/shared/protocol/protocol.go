@@ -1,0 +1,146 @@
+// Package protocol 定义主控与被控之间 WebSocket 通信的消息信封与载荷结构。
+package protocol
+
+import "encoding/json"
+
+// 消息类型。
+const (
+	TypeHello     = "hello"     // A→M 连接建立后的首条消息
+	TypeWelcome   = "welcome"   // M→A 对 hello 的应答
+	TypeHeartbeat = "heartbeat" // A→M 周期性状态上报
+	TypeResult    = "result"    // A→M 对主控指令的应答
+	TypeEndpoint  = "endpoint"  // M→A 主控访问地址变更通知
+	TypeXray      = "xray"      // M→A Xray 进程控制
+	TypeLogs      = "logs"      // M→A 读取 Xray 最近日志
+)
+
+// Xray 控制动作。
+const (
+	XrayStart   = "start"
+	XrayStop    = "stop"
+	XrayRestart = "restart"
+	XrayInstall = "install" // 安装或切换到指定版本
+)
+
+// Feature 表示被控端 Xray 在运行时探测到的可选能力。
+const (
+	CapOnlineStats = "online_stats"
+)
+
+// Envelope 是所有消息的统一信封。
+// 主控发出的指令带 ID，被控端以 TypeResult 应答并在 Re 中回填该 ID。
+type Envelope struct {
+	T  string          `json:"t"`
+	ID string          `json:"id,omitempty"`
+	Re string          `json:"re,omitempty"`
+	D  json.RawMessage `json:"d,omitempty"`
+}
+
+// Endpoint 描述被控端连接主控所用的地址与可选的公钥指纹。
+type Endpoint struct {
+	URL string `json:"url"`          // 主控公开地址，如 https://hub.example.com:2096
+	FP  string `json:"fp,omitempty"` // 自签模式下证书公钥的 SHA-256（base64），为空走系统 CA
+}
+
+// HostInfo 为被控主机的静态信息。
+type HostInfo struct {
+	Hostname        string `json:"hostname"`
+	OS              string `json:"os"`
+	Platform        string `json:"platform"`
+	PlatformVersion string `json:"platformVersion"`
+	Kernel          string `json:"kernel"`
+	Arch            string `json:"arch"`
+	CPUModel        string `json:"cpuModel"`
+	CPUCores        int    `json:"cpuCores"`
+}
+
+// XrayStatus 为被控端 Xray 进程状态。
+type XrayStatus struct {
+	Installed bool   `json:"installed"`
+	Version   string `json:"version"`
+	Enabled   bool   `json:"enabled"` // 期望运行
+	Running   bool   `json:"running"`
+	StartedAt int64  `json:"startedAt"`
+	LastError string `json:"lastError,omitempty"`
+}
+
+// Hello 为被控端连接后上报的身份与状态。
+type Hello struct {
+	AgentVersion string     `json:"agentVersion"`
+	Host         HostInfo   `json:"host"`
+	Xray         XrayStatus `json:"xray"`
+	Caps         []string   `json:"caps"`
+}
+
+// Welcome 为主控对 Hello 的应答。
+type Welcome struct {
+	ServerTime int64    `json:"serverTime"`
+	Endpoint   Endpoint `json:"endpoint"` // 主控当前推荐的访问地址
+}
+
+// Heartbeat 为被控端周期性上报的资源与进程状态。网卡计数为开机以来累计值。
+type Heartbeat struct {
+	CPU       float64    `json:"cpu"`
+	MemUsed   uint64     `json:"memUsed"`
+	MemTotal  uint64     `json:"memTotal"`
+	SwapUsed  uint64     `json:"swapUsed"`
+	SwapTotal uint64     `json:"swapTotal"`
+	DiskUsed  uint64     `json:"diskUsed"`
+	DiskTotal uint64     `json:"diskTotal"`
+	Load1     float64    `json:"load1"`
+	Load5     float64    `json:"load5"`
+	Load15    float64    `json:"load15"`
+	Uptime    uint64     `json:"uptime"`
+	NetRx     uint64     `json:"netRx"`
+	NetTx     uint64     `json:"netTx"`
+	Xray      XrayStatus `json:"xray"`
+	Caps      []string   `json:"caps"`
+}
+
+// Result 为被控端对指令的执行结果。
+type Result struct {
+	OK    bool            `json:"ok"`
+	Error string          `json:"error,omitempty"`
+	Data  json.RawMessage `json:"data,omitempty"`
+}
+
+// XrayCommand 为 Xray 控制指令。Install 时 Version 为目标版本（如 v26.7.28）。
+type XrayCommand struct {
+	Action  string `json:"action"`
+	Version string `json:"version,omitempty"`
+}
+
+// LogsRequest 请求最近 Lines 行 Xray 日志。
+type LogsRequest struct {
+	Lines int `json:"lines"`
+}
+
+// LogsResponse 为日志查询结果。
+type LogsResponse struct {
+	Lines []string `json:"lines"`
+}
+
+// EnrollRequest 为被控端用一次性令牌换取节点凭据的请求。
+type EnrollRequest struct {
+	Token    string `json:"token"`
+	Hostname string `json:"hostname"`
+}
+
+// EnrollResponse 为接入成功后下发的节点凭据。
+type EnrollResponse struct {
+	NodeID int64  `json:"nodeId"`
+	Secret string `json:"secret"`
+}
+
+// Marshal 把载荷编码进信封。
+func Marshal(t, id, re string, payload any) ([]byte, error) {
+	env := Envelope{T: t, ID: id, Re: re}
+	if payload != nil {
+		d, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		env.D = d
+	}
+	return json.Marshal(env)
+}
