@@ -13,7 +13,6 @@ import (
 
 	"github.com/Yuuuuu0/x-hub/internal/master/routing"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
-	"github.com/Yuuuuu0/x-hub/internal/master/sub"
 )
 
 // ruleSetRefs 返回规则集库中各规则集的下载信息：托管的指向主控，外部的保持原链接。
@@ -312,29 +311,34 @@ func (h *Handler) previewProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "请选择用于预览的订阅")
 		return
 	}
-	out, warnings, err := h.renderMihomoProfile(p, s)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if warnings == nil {
-		warnings = []string{}
-	}
-	nodes, err := h.subscriptionNodes(s)
+	nodes, warnings, err := h.subscriptionNodes(s)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	names := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		names = append(names, n.Name)
+	out, renderWarnings, err := h.renderMihomoProfile(p, nodes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	members, _ := p.ExpandGroups(nodes)
-	writeJSON(w, http.StatusOK, map[string]any{"issues": issues, "warnings": warnings, "mihomo": string(out), "nodes": names, "members": members})
+	warnings = append(warnings, renderWarnings...)
+	if warnings == nil {
+		warnings = []string{}
+	}
+	type nodeInfo struct {
+		Name string `json:"name"`
+		Own  bool   `json:"own"`
+	}
+	infos := make([]nodeInfo, len(nodes))
+	for i, n := range nodes {
+		infos[i] = nodeInfo{n.Name, n.Own}
+	}
+	members, _ := p.ExpandGroups(routingNodes(nodes))
+	writeJSON(w, http.StatusOK, map[string]any{"issues": issues, "warnings": warnings, "mihomo": string(out), "nodes": infos, "members": members})
 }
 
 // renderMihomoProfile 以订阅可用的节点渲染方案。
-func (h *Handler) renderMihomoProfile(p *routing.Profile, s *store.Subscription) ([]byte, []string, error) {
+func (h *Handler) renderMihomoProfile(p *routing.Profile, nodes []outNode) ([]byte, []string, error) {
 	refs, err := h.ruleSetRefs()
 	if err != nil {
 		return nil, nil, err
@@ -344,24 +348,7 @@ func (h *Handler) renderMihomoProfile(p *routing.Profile, s *store.Subscription)
 			return nil, nil, errors.New("使用托管规则集需要先在「设置 → 访问」中填写公开访问地址")
 		}
 	}
-	nodes, err := h.subscriptionNodes(s)
-	if err != nil {
-		return nil, nil, err
-	}
-	return p.RenderMihomo(nodes, refs)
-}
-
-// subscriptionNodes 返回订阅可用的节点。
-func (h *Handler) subscriptionNodes(s *store.Subscription) ([]routing.Node, error) {
-	nodes, err := sub.Collect(h.Store, s, h.Settings.Subscription().NameTemplate)
-	if err != nil {
-		return nil, err
-	}
-	rn := make([]routing.Node, 0, len(nodes))
-	for _, n := range nodes {
-		rn = append(rn, routing.Node{Name: n.Name, Own: true, Mihomo: n.Mihomo})
-	}
-	return rn, nil
+	return p.RenderMihomo(routingNodes(nodes), refs)
 }
 
 // subscriptionProfile 返回订阅选用的方案，未选用或方案已失效时返回 nil。

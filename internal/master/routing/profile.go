@@ -273,6 +273,13 @@ func DefaultProfile() *Profile {
 	}
 }
 
+// BuiltinProfile 返回未选择方案的订阅使用的内置精简方案：与默认方案相同，基础配置只含端口与模式。
+func BuiltinProfile() *Profile {
+	p := DefaultProfile()
+	p.Mihomo.Base = "mixed-port: 7890\nallow-lan: false\nmode: rule\nlog-level: info\n"
+	return p
+}
+
 const defaultMihomoBase = `mixed-port: 7890
 allow-lan: false
 mode: rule

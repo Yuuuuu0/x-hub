@@ -3,6 +3,7 @@ package routing
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -12,11 +13,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Node 为渲染时可用的一个节点。Mihomo 为可直接编码进 proxies 的节点定义。
+// Node 为渲染时可用的一个节点。Mihomo 为可直接编码进 proxies 的节点定义：自有节点为结构体，
+// 外部节点为 map（名称以 Name 为准）。Dialer 为外部节点的前置：DialerNode 为真时是节点名，否则是分组名。
 type Node struct {
-	Name   string
-	Own    bool
-	Mihomo any
+	Name       string
+	Own        bool
+	Mihomo     any
+	Dialer     string
+	DialerNode bool
 }
 
 // RuleSetRef 为渲染时规则集的下载信息。
@@ -111,11 +115,13 @@ func (p *Profile) RenderMihomo(nodes []Node, sets map[string]RuleSetRef) ([]byte
 		}
 	}
 
+	nodes, warnings := p.prepareNodes(nodes)
 	proxies := make([]any, 0, len(nodes))
 	for _, n := range nodes {
-		proxies = append(proxies, n.Mihomo)
+		proxies = append(proxies, mihomoProxy(n))
 	}
-	expanded, warnings := p.ExpandGroups(nodes)
+	expanded, expandWarnings := p.ExpandGroups(nodes)
+	warnings = append(warnings, expandWarnings...)
 	groups := make([]mihomoGroup, 0, len(p.Groups))
 	for _, g := range p.Groups {
 		mg := mihomoGroup{Name: g.Name, Type: g.Type, Proxies: expanded[g.Name]}
@@ -170,6 +176,119 @@ func (p *Profile) RenderMihomo(nodes []Node, sets map[string]RuleSetRef) ([]byte
 		return nil, nil, err
 	}
 	return out, warnings, nil
+}
+
+// prepareNodes 处理与分组或内置出站重名的节点（追加序号），并移除前置分组无效的外部节点：
+// 方案中没有该分组，或节点本身被前置分组（直接或间接）包含而形成循环。前置节点由调用方保证存在。
+func (p *Profile) prepareNodes(nodes []Node) ([]Node, []string) {
+	var warnings []string
+	taken := map[string]bool{}
+	for _, b := range Builtins {
+		taken[b] = true
+	}
+	groupNames := map[string]bool{}
+	for _, g := range p.Groups {
+		taken[g.Name], groupNames[g.Name] = true, true
+	}
+	for _, n := range nodes {
+		if !groupNames[n.Name] {
+			taken[n.Name] = true
+		}
+	}
+	renamed := map[string]string{}
+	out := make([]Node, 0, len(nodes))
+	for _, n := range nodes {
+		if groupNames[n.Name] || slices.Contains(Builtins, n.Name) {
+			name := n.Name
+			for i := 2; taken[name]; i++ {
+				name = fmt.Sprintf("%s %d", n.Name, i)
+			}
+			taken[name], renamed[n.Name] = true, name
+			warnings = append(warnings, fmt.Sprintf("节点 %s 与分组或内置出站重名，已改为 %s", n.Name, name))
+			n.Name = name
+		}
+		out = append(out, n)
+	}
+
+	for i := range out {
+		if r, ok := renamed[out[i].Dialer]; ok && out[i].DialerNode {
+			out[i].Dialer = r
+		}
+	}
+	expanded, _ := p.ExpandGroups(out)
+	kept := out[:0]
+	for _, n := range out {
+		switch {
+		case n.Dialer == "" || n.DialerNode:
+		case !groupNames[n.Dialer]:
+			warnings = append(warnings, fmt.Sprintf("节点 %s 的前置分组 %s 不在此方案中，已跳过", n.Name, n.Dialer))
+			continue
+		case reaches(expanded, n.Dialer, n.Name):
+			warnings = append(warnings, fmt.Sprintf("节点 %s 被其前置分组 %s 包含，会形成循环，已跳过", n.Name, n.Dialer))
+			continue
+		}
+		kept = append(kept, n)
+	}
+	return kept, warnings
+}
+
+// reaches 判断分组 group 是否直接或经由子分组包含成员 target。
+func reaches(expanded map[string][]string, group, target string) bool {
+	seen := map[string]bool{}
+	var walk func(string) bool
+	walk = func(g string) bool {
+		if seen[g] {
+			return false
+		}
+		seen[g] = true
+		for _, m := range expanded[g] {
+			if m == target {
+				return true
+			}
+			if _, isGroup := expanded[m]; isGroup && walk(m) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(group)
+}
+
+// mihomoProxy 返回节点在 proxies 中的定义。外部节点按 name、type、server、port 在前、其余键按字母序编码，
+// 并写入最终名称与前置。
+func mihomoProxy(n Node) any {
+	m, ok := n.Mihomo.(map[string]any)
+	if !ok {
+		return n.Mihomo
+	}
+	m = maps.Clone(m)
+	m["name"] = n.Name
+	if n.Dialer != "" {
+		m["dialer-proxy"] = n.Dialer
+	}
+	first := []string{"name", "type", "server", "port"}
+	keys := slices.Collect(maps.Keys(m))
+	slices.SortFunc(keys, func(a, b string) int {
+		ia, ib := slices.Index(first, a), slices.Index(first, b)
+		switch {
+		case ia >= 0 && ib >= 0:
+			return ia - ib
+		case ia >= 0:
+			return -1
+		case ib >= 0:
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+	node := &yaml.Node{Kind: yaml.MappingNode}
+	for _, k := range keys {
+		var v yaml.Node
+		if err := v.Encode(m[k]); err != nil {
+			continue
+		}
+		node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: k}, &v)
+	}
+	return node
 }
 
 // encodeYAML 以两空格缩进编码，并把 yaml.v3 转义的 emoji 等可打印字符还原为原文，便于阅读。

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Yuuuuu0/x-hub/internal/master/auth"
 	"github.com/Yuuuuu0/x-hub/internal/master/model"
+	"github.com/Yuuuuu0/x-hub/internal/master/routing"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 	"github.com/Yuuuuu0/x-hub/internal/master/sub"
 )
@@ -356,7 +357,7 @@ func (h *Handler) serveSubscription(w http.ResponseWriter, r *http.Request, toke
 		return
 	}
 	cfg := h.Settings.Subscription()
-	nodes, err := sub.Collect(h.Store, s, cfg.NameTemplate)
+	nodes, _, err := h.subscriptionNodes(s)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -364,10 +365,21 @@ func (h *Handler) serveSubscription(w http.ResponseWriter, r *http.Request, toke
 	format := sub.DetectFormat(r.UserAgent(), r.URL.Query().Get("format"))
 	var body []byte
 	ctype := "text/yaml; charset=utf-8"
-	if p := h.subscriptionProfile(s); p != nil && format == sub.FormatMihomo {
-		body, _, err = h.renderMihomoProfile(p, s)
+	if format == sub.FormatMihomo {
+		p := h.subscriptionProfile(s)
+		if p == nil {
+			p = routing.BuiltinProfile()
+		}
+		body, _, err = h.renderMihomoProfile(p, nodes)
 	} else {
-		body, ctype, err = sub.Render(format, nodes)
+		// Base64 与 sing-box 无法表达链式代理，带前置的外部节点不输出；外部节点暂不输出到 sing-box。
+		list := make([]sub.Node, 0, len(nodes))
+		for _, n := range nodes {
+			if n.Dialer == "" {
+				list = append(list, sub.Node{Name: n.Name, Link: n.Link, SingBox: n.SingBox})
+			}
+		}
+		body, ctype, err = sub.Render(format, list)
 	}
 	if err != nil {
 		h.Log.Warn("render subscription", "sub", s.ID, "format", format, "err", err)

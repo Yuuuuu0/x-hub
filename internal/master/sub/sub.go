@@ -1,4 +1,4 @@
-// Package sub 生成订阅内容：按订阅的入站范围收集节点，并渲染为通用 Base64 或 Mihomo 配置。
+// Package sub 生成订阅内容：按订阅的入站范围收集自有节点，并渲染为通用 Base64 或 sing-box 配置。
 package sub
 
 import (
@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/Yuuuuu0/x-hub/internal/master/model"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
@@ -55,10 +53,11 @@ func DetectFormat(userAgent, override string) Format {
 
 // Node 为订阅中的一个节点。SingBox 为空表示 sing-box 不支持该协议组合。
 type Node struct {
-	Name    string
-	Link    string
-	Mihomo  model.MihomoProxy
-	SingBox map[string]any
+	Name      string
+	InboundID int64
+	Link      string
+	Mihomo    model.MihomoProxy
+	SingBox   map[string]any
 }
 
 // Target 计算入站对外的连接信息与按模板生成的名称。
@@ -124,7 +123,7 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string) ([]Nod
 			cred := model.CredentialFor(in.Protocol, spec, s.UUID, s.Secret, in.ID)
 			sb, _ := model.SingBox(in.Protocol, spec, t, cred)
 			out = append(out, Node{
-				Name: t.Name, Link: model.ShareLink(in.Protocol, spec, t, cred),
+				Name: t.Name, InboundID: in.ID, Link: model.ShareLink(in.Protocol, spec, t, cred),
 				Mihomo: model.Mihomo(in.Protocol, spec, t, cred), SingBox: sb,
 			})
 		}
@@ -132,75 +131,25 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string) ([]Nod
 	return out, nil
 }
 
-// Render 按格式渲染订阅内容，返回内容与 Content-Type。
+// Render 按格式渲染 Base64 或 sing-box 订阅内容，返回内容与 Content-Type。Mihomo 由分流方案渲染。
 func Render(f Format, nodes []Node) ([]byte, string, error) {
-	switch f {
-	case FormatMihomo:
-		b, err := renderMihomo(nodes)
-		return b, "text/yaml; charset=utf-8", err
-	case FormatSingBox:
+	if f == FormatSingBox {
 		b, err := renderSingBox(nodes)
 		return b, "application/json; charset=utf-8", err
 	}
-	links := make([]string, len(nodes))
-	for i, n := range nodes {
-		links[i] = n.Link
+	links := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Link != "" {
+			links = append(links, n.Link)
+		}
 	}
 	return []byte(base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))), "text/plain; charset=utf-8", nil
-}
-
-type mihomoGroup struct {
-	Name      string   `yaml:"name"`
-	Type      string   `yaml:"type"`
-	Proxies   []string `yaml:"proxies"`
-	URL       string   `yaml:"url,omitempty"`
-	Interval  int      `yaml:"interval,omitempty"`
-	Tolerance int      `yaml:"tolerance,omitempty"`
-}
-
-type mihomoConfig struct {
-	MixedPort   int                 `yaml:"mixed-port"`
-	AllowLan    bool                `yaml:"allow-lan"`
-	Mode        string              `yaml:"mode"`
-	LogLevel    string              `yaml:"log-level"`
-	Proxies     []model.MihomoProxy `yaml:"proxies"`
-	ProxyGroups []mihomoGroup       `yaml:"proxy-groups"`
-	Rules       []string            `yaml:"rules"`
 }
 
 const (
 	groupSelect = "节点选择"
 	groupAuto   = "自动选择"
 )
-
-// renderMihomo 生成精简的 Mihomo 配置：手动选择 + 延迟自动选择，局域网与国内直连。
-func renderMihomo(nodes []Node) ([]byte, error) {
-	cfg := mihomoConfig{MixedPort: 7890, Mode: "rule", LogLevel: "info", Proxies: []model.MihomoProxy{}}
-	names := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		cfg.Proxies = append(cfg.Proxies, n.Mihomo)
-		names = append(names, n.Name)
-	}
-	selectProxies := []string{}
-	if len(names) > 0 {
-		selectProxies = append(selectProxies, groupAuto)
-	}
-	selectProxies = append(append(selectProxies, names...), "DIRECT")
-	cfg.ProxyGroups = []mihomoGroup{{Name: groupSelect, Type: "select", Proxies: selectProxies}}
-	if len(names) > 0 {
-		cfg.ProxyGroups = append(cfg.ProxyGroups, mihomoGroup{
-			Name: groupAuto, Type: "url-test", Proxies: names,
-			URL: "https://www.gstatic.com/generate_204", Interval: 300, Tolerance: 50,
-		})
-	}
-	cfg.Rules = []string{
-		"GEOIP,LAN,DIRECT,no-resolve",
-		"GEOSITE,CN,DIRECT",
-		"GEOIP,CN,DIRECT",
-		"MATCH," + groupSelect,
-	}
-	return yaml.Marshal(cfg)
-}
 
 // renderSingBox 生成 sing-box 配置（1.12+ 格式）：TUN 与本地 mixed 入站、手动 / 自动选择、
 // 局域网与国内直连。sing-box 不支持的节点（XHTTP）不输出。

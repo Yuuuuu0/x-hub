@@ -102,6 +102,7 @@ func Run(opts Options) error {
 	defer stop()
 	go cleanupLoop(ctx, st, log)
 	go h.Accounting.Run(ctx)
+	go h.RunExternalRefresh(ctx)
 	<-ctx.Done()
 
 	log.Info("shutting down")
