@@ -1,5 +1,5 @@
 // 分流方案编辑用到的常量与工具。
-import type { NodeFilter } from './api'
+import type { NodeFilter, PreviewNode } from './api'
 
 export const BUILTINS = ['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS']
 
@@ -41,13 +41,15 @@ function toJS(re: string) {
   return re.startsWith('(?i)') ? new RegExp(re.slice(4), 'i') : new RegExp(re)
 }
 
-/** 按筛选条件匹配节点名，与主控的展开逻辑一致；正则无效时返回 null。目前节点均为自有服务器。 */
-export function matchNodes(f: NodeFilter, names: string[]): string[] | null {
-  if (f.source === 'external') return []
+/** 按筛选条件匹配节点，与主控的展开逻辑一致，返回节点名；正则无效时返回 null。 */
+export function matchNodes(f: NodeFilter, nodes: PreviewNode[]): string[] | null {
   try {
     const inc = f.include ? toJS(f.include) : null
     const exc = f.exclude ? toJS(f.exclude) : null
-    return names.filter((n) => (!inc || inc.test(n)) && (!exc || !exc.test(n)))
+    return nodes
+      .filter((n) => (f.source === 'own' ? n.own : f.source === 'external' ? !n.own : true))
+      .map((n) => n.name)
+      .filter((n) => (!inc || inc.test(n)) && (!exc || !exc.test(n)))
   } catch {
     return null
   }

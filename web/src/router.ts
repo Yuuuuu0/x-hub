@@ -12,6 +12,7 @@ export const router = createRouter({
         { path: '', redirect: { name: 'nodes' } },
         { path: 'nodes', name: 'nodes', component: () => import('./views/NodesView.vue'), meta: { title: '服务器' } },
         { path: 'inbounds', name: 'inbounds', component: () => import('./views/InboundsView.vue'), meta: { title: '入站' } },
+        { path: 'external', name: 'external', component: () => import('./views/ExternalView.vue'), meta: { title: '外部节点' } },
         { path: 'subscriptions', name: 'subscriptions', component: () => import('./views/SubscriptionsView.vue'), meta: { title: '订阅' } },
         {
           path: 'routing',

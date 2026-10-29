@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import type { RouteGroup } from '../lib/api'
+import type { PreviewNode, RouteGroup } from '../lib/api'
 import { BUILTINS, GROUP_TYPES, matchNodes } from '../lib/routing'
 
 // 编辑分组：类型、固定成员与节点筛选。保存时把结果交还给方案编辑器，由其处理改名引用。
-const props = defineProps<{ group: RouteGroup | null; groupNames: string[]; nodeNames: string[] }>()
+const props = defineProps<{ group: RouteGroup | null; groupNames: string[]; nodes: PreviewNode[] }>()
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ save: [g: RouteGroup] }>()
 
@@ -50,7 +50,7 @@ const memberOptions = computed(() => [
 
 /** 按当前筛选条件匹配预览订阅中的节点；正则无效时为 null。 */
 const matched = computed(() =>
-  form.withNodes ? matchNodes({ include: form.include, exclude: form.exclude, source: form.source }, props.nodeNames) : [],
+  form.withNodes ? matchNodes({ include: form.include, exclude: form.exclude, source: form.source }, props.nodes) : [],
 )
 
 function save() {
@@ -135,9 +135,9 @@ function save() {
           </a-form-item>
           <div class="match">
             <template v-if="matched === null"><span class="bad">正则无效</span></template>
-            <template v-else-if="!nodeNames.length"><span class="muted">在「预览」中选择一个订阅后，这里会显示匹配到的节点。</span></template>
+            <template v-else-if="!nodes.length"><span class="muted">在「预览」中选择一个订阅后，这里会显示匹配到的节点。</span></template>
             <template v-else>
-              <span class="muted">在预览订阅的 {{ nodeNames.length }} 个节点中匹配到 {{ matched.length }} 个</span>
+              <span class="muted">在预览订阅的 {{ nodes.length }} 个节点中匹配到 {{ matched.length }} 个</span>
               <div class="tags">
                 <a-tag v-for="n in matched" :key="n" :bordered="false">{{ n }}</a-tag>
               </div>

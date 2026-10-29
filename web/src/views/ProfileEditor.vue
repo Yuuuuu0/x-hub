@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { Modal, message } from 'ant-design-vue'
 import { ArrowLeft, Copy, GripVertical, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-vue-next'
-import { api, ApiError, type ProfileItem, type ProfileSpec, type RouteGroup, type RouteRule, type RuleSetItem, type Subscription } from '../lib/api'
+import { api, ApiError, type ProfileItem, type ProfileSpec, type RouteGroup, type RouteRule, type PreviewNode, type RuleSetItem, type Subscription } from '../lib/api'
 import { BUILTINS, GROUP_TYPE_LABEL, NO_RESOLVE, RULE_TYPES, matchNodes } from '../lib/routing'
 import { copyText } from '../lib/clipboard'
 import CodeEditor from '../components/CodeEditor.vue'
@@ -26,7 +26,7 @@ const issues = ref<string[]>([])
 const ruleSets = ref<RuleSetItem[]>([])
 const subs = ref<Subscription[]>([])
 
-const preview = reactive({ subId: undefined as number | undefined, loading: false, mihomo: '', warnings: [] as string[], issues: [] as string[], nodes: [] as string[] })
+const preview = reactive({ subId: undefined as number | undefined, loading: false, mihomo: '', warnings: [] as string[], issues: [] as string[], nodes: [] as PreviewNode[] })
 
 const current = () => JSON.stringify({ name: name.value, note: note.value, spec })
 const dirty = computed(() => loaded.value && current() !== snapshot.value)
@@ -78,7 +78,7 @@ async function runPreview() {
   if (!preview.subId) return
   preview.loading = true
   try {
-    const r = await api.post<{ mihomo: string; warnings: string[]; issues: string[]; nodes?: string[] }>('profiles/preview', { subscriptionId: preview.subId, spec })
+    const r = await api.post<{ mihomo: string; warnings: string[]; issues: string[]; nodes?: PreviewNode[] }>('profiles/preview', { subscriptionId: preview.subId, spec })
     preview.mihomo = r.mihomo
     preview.warnings = r.warnings
     preview.issues = r.issues
@@ -455,7 +455,7 @@ async function copyPreview() {
       v-model:open="showGroup"
       :group="editingGroup >= 0 ? spec.groups[editingGroup] : null"
       :group-names="groupNames"
-      :node-names="preview.nodes"
+      :nodes="preview.nodes"
       @save="saveGroup"
     />
     <RuleSetModal v-model:open="showSet" :rule-set="null" @saved="reloadRuleSets" />

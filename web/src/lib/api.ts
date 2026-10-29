@@ -339,3 +339,42 @@ export interface RuleSetItem {
   profiles?: string[]
   updatedAt: number
 }
+
+export interface ExternalSource {
+  id: number
+  kind: 'manual' | 'remote'
+  name: string
+  enabled: boolean
+  content: string
+  userAgent: string
+  interval: number
+  prefix: string
+  include: string
+  exclude: string
+  chain: string
+  allSubs: boolean
+  subIds: number[]
+  fetchedAt: number
+  fetchError: string
+  userInfo: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ExternalNode {
+  name: string
+  type: string
+  server: string
+  excluded: boolean
+}
+
+export interface ExternalItem {
+  source: ExternalSource
+  nodes: ExternalNode[]
+}
+
+/** 预览订阅中的节点；own 为 x-hub 管理的服务器。 */
+export interface PreviewNode {
+  name: string
+  own: boolean
+}
