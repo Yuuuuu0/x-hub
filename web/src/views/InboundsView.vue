@@ -192,11 +192,12 @@ h1 {
 }
 .groups {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 640px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
   align-items: start;
   gap: 18px;
 }
 .group {
+  container-type: inline-size;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -251,6 +252,21 @@ h1 {
 }
 .row + .row {
   border-top: 1px dashed var(--border);
+}
+/* 卡片较窄时（宽屏多列）把伪装目标 / SNI 移到第二行，避免名称与标签被挤压。 */
+@container (max-width: 640px) {
+  .row {
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    row-gap: 2px;
+  }
+  .sni {
+    grid-column: 2 / 4;
+    grid-row: 2;
+  }
+  .acts {
+    grid-column: 4;
+    grid-row: 1 / 3;
+  }
 }
 .row:hover {
   background: var(--surface-2);

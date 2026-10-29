@@ -66,6 +66,12 @@ const expiry = computed(() => {
   return { text: `VPS ${date} 到期 · 剩 ${days} 天`, tone: days <= 7 ? 'warn' : '' }
 })
 
+/** 紧凑的运行时长：超过一天只显示天数，完整时长见悬停提示。 */
+const uptime = computed(() => {
+  const sec = hb.value?.uptime ?? 0
+  return sec >= 86400 ? `${Math.floor(sec / 86400)} 天` : duration(sec)
+})
+
 const rx = computed(() => bytesParts(rt.value.rxRate))
 const tx = computed(() => bytesParts(rt.value.txRate))
 
@@ -193,8 +199,8 @@ function onMenu({ key }: { key: string | number }) {
         </div>
         <p class="meta mono">
           <SyncChip :node="node" class="sync" @retried="emit('synced')" />
-          <span v-if="online && hb">已运行 {{ duration(hb.uptime) }}</span>
-          <span v-if="online && hb">累计 ↓{{ bytes(hb.netRx) }} ↑{{ bytes(hb.netTx) }}</span>
+          <span v-if="online && hb" :title="`已运行 ${duration(hb.uptime)}`">运行 {{ uptime }}</span>
+          <span v-if="online && hb" class="total" :title="`开机以来累计 ↓${bytes(hb.netRx)} ↑${bytes(hb.netTx)}`">累计 ↓{{ bytes(hb.netRx) }} ↑{{ bytes(hb.netTx) }}</span>
           <span v-if="node.xrayPinnedVersion">锁定 {{ node.xrayPinnedVersion }}</span>
           <a-tooltip v-if="agentOutdated" :title="`最新被控端版本为 ${agentVersion}，可通过重装命令更新`">
             <span class="outdated">Agent {{ node.agentVersion }}</span>
@@ -555,11 +561,25 @@ h3 {
 
 .meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
+  align-items: center;
+  gap: 12px;
   margin: 10px 0 0;
   font-size: 11px;
   color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.meta > * {
+  flex: none;
+}
+
+/* 空间不足时只压缩累计流量，其余信息保持完整。 */
+.meta > .total {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .meta .sync {

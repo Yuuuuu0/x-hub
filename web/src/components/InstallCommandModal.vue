@@ -45,6 +45,16 @@ async function generate() {
   }
 }
 
+// 上线后提示并自动关闭弹窗。
+watch(
+  () => progress.value.done,
+  (done) => {
+    if (!done || !open.value) return
+    message.success(`「${props.node?.name}」已上线`)
+    setTimeout(() => (open.value = false), 1200)
+  },
+)
+
 watch(open, (v) => {
   if (!v) return
   const rt = props.node?.runtime

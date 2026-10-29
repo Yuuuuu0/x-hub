@@ -121,10 +121,17 @@ func (h *Handler) renderShadowrocketProfile(p *routing.Profile, nodes []outNode)
 		return nil, nil, errNoPublicURL
 	}
 	var list []routing.Node
+	var skipped []string
 	for _, n := range nodes {
-		if n.Dialer == "" && n.Link != "" {
+		switch {
+		case n.Dialer != "":
+			skipped = append(skipped, fmt.Sprintf("节点 %s 使用链式代理，通用订阅无法表达，Shadowrocket 中不可用", n.Name))
+		case n.Link == "":
+			skipped = append(skipped, fmt.Sprintf("节点 %s 的类型无法生成分享链接，Shadowrocket 中不可用", n.Name))
+		default:
 			list = append(list, n.Node)
 		}
 	}
-	return p.RenderShadowrocket(list, refs)
+	out, warnings, err := p.RenderShadowrocket(list, refs)
+	return out, append(skipped, warnings...), err
 }

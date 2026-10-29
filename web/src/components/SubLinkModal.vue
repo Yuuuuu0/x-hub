@@ -17,8 +17,8 @@ const FORMATS = [
   { value: 'singbox', label: 'sing-box', hint: 'sing-box 官方客户端（SFA / SFI / SFM，1.12 及以上），含 TUN 与分流规则；不包含 XHTTP 节点。' },
   {
     value: 'shadowrocket',
-    label: 'Shadowrocket',
-    hint: 'Shadowrocket 的分流配置（分组与规则），在 Shadowrocket「配置」页添加；节点仍需在首页用「自动识别」或「通用」链接订阅。',
+    label: 'Shadowrocket 分流配置',
+    hint: '不含节点，不要加在首页。在 Shadowrocket 底部「配置」页添加并选择「使用配置」；节点仍在首页用「自动识别」或「通用」链接订阅。',
   },
 ]
 const format = ref('auto')
@@ -48,10 +48,10 @@ async function copy() {
 </script>
 
 <template>
-  <a-modal v-model:open="open" :footer="null" :width="600" centered :title="`订阅链接 · ${sub?.name ?? ''}`">
+  <a-modal v-model:open="open" :footer="null" :width="640" centered :title="`订阅链接 · ${sub?.name ?? ''}`">
     <a-alert v-if="!sub?.url" type="warning" show-icon message="请先在「设置 → 访问」中填写公开访问地址" />
     <div v-else class="body">
-      <a-segmented v-model:value="format" :options="FORMATS.map(({ value, label }) => ({ value, label }))" block />
+      <a-segmented v-model:value="format" :options="FORMATS.map(({ value, label }) => ({ value, label }))" class="formats" />
       <p class="muted hint">{{ hint }}</p>
       <div class="qr"><img v-if="qr" :src="qr" alt="订阅二维码" /></div>
       <div class="link mono">{{ link }}</div>
@@ -70,6 +70,11 @@ async function copy() {
   flex-direction: column;
   gap: 12px;
   margin-top: 12px;
+}
+.formats {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .hint,
 .foot {

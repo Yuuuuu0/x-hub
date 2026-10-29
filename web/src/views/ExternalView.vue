@@ -158,7 +158,12 @@ function remove(it: ExternalItem) {
             <template v-if="it.nodes.some((n) => n.excluded)">（筛掉 {{ it.nodes.filter((n) => n.excluded).length }} 个）</template>
           </span>
           <span v-if="it.source.kind === 'remote'" class="muted">更新于 {{ ago(it.source.fetchedAt) }}</span>
-          <span v-if="it.source.chain" class="chain"><Link2 :size="13" />{{ chainText(it.source.chain) }}</span>
+          <span v-if="it.source.chain" class="chain">
+            <Link2 :size="13" />{{ chainText(it.source.chain) }}
+            <a-tooltip title="通用订阅（Shadowrocket、v2rayN 等）无法表达链式代理，这些节点只出现在 Clash 系与 sing-box 客户端中">
+              <span class="only">仅 Clash / sing-box</span>
+            </a-tooltip>
+          </span>
           <span class="muted">可见：{{ scopeText(it) }}</span>
         </div>
 
@@ -298,6 +303,15 @@ h1 {
   align-items: center;
   gap: 6px;
   color: var(--text-2);
+}
+.only {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  color: var(--warn);
+  font-size: 11px;
+  cursor: help;
 }
 .usage-line {
   display: flex;
