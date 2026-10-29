@@ -31,8 +31,10 @@ var versionRe = regexp.MustCompile(`Xray (\d+\.\d+\.\d+)`)
 
 // state 为需要跨被控端重启保留的 Xray 状态。
 type state struct {
-	Enabled bool `json:"enabled"` // 期望运行
-	APIPort int  `json:"apiPort"` // Xray gRPC API 本地端口
+	Enabled     bool   `json:"enabled"`     // 期望运行
+	APIPort     int    `json:"apiPort"`     // Xray gRPC API 本地端口
+	AppliedRev  int64  `json:"appliedRev"`  // 已应用的主控配置版本
+	AppliedHash string `json:"appliedHash"` // 已应用的主控配置哈希
 }
 
 // Manager 托管一个 Xray 子进程。ops 串行化启停与安装操作，mu 保护运行时字段。
@@ -290,31 +292,16 @@ func (m *Manager) setErr(msg string) {
 	m.notify()
 }
 
-// ensureConfig 在本地没有配置时写入仅含 API 与统计的基础配置，保证 Xray 可先行启动。
+// ensureConfig 在本地没有配置时写入仅含自管段的基础配置，保证 Xray 可先行启动。
 func (m *Manager) ensureConfig() error {
 	if _, err := os.Stat(m.configPath()); err == nil {
 		return nil
 	}
-	cfg := map[string]any{
-		"log": map[string]any{"loglevel": "warning", "access": "none"},
-		"api": map[string]any{
-			"tag":      "api",
-			"listen":   fmt.Sprintf("127.0.0.1:%d", m.st.APIPort),
-			"services": []string{"HandlerService", "StatsService"},
-		},
-		"stats": map[string]any{},
-		"policy": map[string]any{
-			"levels": map[string]any{"0": map[string]any{
-				"statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true,
-			}},
-		},
-		"inbounds": []any{},
-		"outbounds": []any{
-			map[string]any{"protocol": "freedom", "tag": "direct"},
-			map[string]any{"protocol": "blackhole", "tag": "block"},
-		},
+	b, err := m.withManagement([]byte(`{"log":{"loglevel":"warning","access":"none"},"inbounds":[],` +
+		`"outbounds":[{"protocol":"freedom","tag":"direct"},{"protocol":"blackhole","tag":"block"}]}`))
+	if err != nil {
+		return err
 	}
-	b, _ := json.MarshalIndent(cfg, "", "  ")
 	return os.WriteFile(m.configPath(), b, 0o600)
 }
 

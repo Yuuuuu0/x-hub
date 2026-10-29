@@ -20,6 +20,7 @@ import (
 
 	"github.com/Yuuuuu0/x-hub/internal/agent/config"
 	"github.com/Yuuuuu0/x-hub/internal/agent/metrics"
+	"github.com/Yuuuuu0/x-hub/internal/agent/probe"
 	"github.com/Yuuuuu0/x-hub/internal/agent/xray"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 	"github.com/Yuuuuu0/x-hub/internal/shared/tlspin"
@@ -100,6 +101,7 @@ func (c *Client) session(ctx context.Context, ep protocol.Endpoint, idx int) (co
 	ws.SetReadLimit(8 << 20)
 
 	hello := protocol.Hello{AgentVersion: version.Version, Host: c.host, Xray: c.xray.Status(), Caps: c.xray.Caps()}
+	hello.AppliedRev, hello.AppliedHash = c.xray.Applied()
 	if err := c.write(ctx, ws, protocol.TypeHello, "", hello); err != nil {
 		return false, err
 	}
@@ -206,6 +208,10 @@ func (c *Client) readLoop(ctx context.Context, ws *websocket.Conn) error {
 			}
 		case protocol.TypeXray:
 			go c.reply(ctx, ws, env.ID, c.handleXray(ctx, env.D))
+		case protocol.TypeApply:
+			go c.reply(ctx, ws, env.ID, c.handleApply(env.D))
+		case protocol.TypeProbe:
+			go c.reply(ctx, ws, env.ID, c.handleProbe(ctx, env.D))
 		case protocol.TypeLogs:
 			var req protocol.LogsRequest
 			json.Unmarshal(env.D, &req)
@@ -243,6 +249,34 @@ func (c *Client) handleXray(ctx context.Context, raw json.RawMessage) protocol.R
 		return protocol.Result{Error: err.Error()}
 	}
 	return okResult(c.xray.Status())
+}
+
+// handleApply 应用主控下发的 Xray 配置。
+func (c *Client) handleApply(raw json.RawMessage) protocol.Result {
+	var a protocol.Apply
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return protocol.Result{Error: err.Error()}
+	}
+	if err := c.xray.Apply(a.Rev, a.Hash, a.Config); err != nil {
+		return protocol.Result{Error: err.Error()}
+	}
+	rev, hash := c.xray.Applied()
+	return okResult(protocol.ApplyResult{Rev: rev, Hash: hash})
+}
+
+// handleProbe 执行本机探测。
+func (c *Client) handleProbe(ctx context.Context, raw json.RawMessage) protocol.Result {
+	var req protocol.ProbeRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return protocol.Result{Error: err.Error()}
+	}
+	switch req.Kind {
+	case protocol.ProbeRealityTarget:
+		return okResult(probe.RealityTarget(ctx, req.Target, req.ServerName))
+	case protocol.ProbePort:
+		return okResult(c.xray.PortStatus(req.Port))
+	}
+	return protocol.Result{Error: "未知探测类型：" + req.Kind}
 }
 
 // fetchXray 从主控中转下载 Xray 安装包，依次尝试候选地址。
