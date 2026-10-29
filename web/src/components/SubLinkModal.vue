@@ -60,7 +60,7 @@ async function copy() {
         {{ copied ? '已复制' : '复制订阅链接' }}
       </a-button>
       <div class="share">
-        <p class="muted">把「自动识别」链接直接发给使用者，用浏览器打开即可看到用量与各客户端的一键导入说明。</p>
+        <p class="muted">把「自动识别」链接直接发给使用者，用浏览器打开即可看到用量、到期时间，并查看或下载各客户端的订阅内容。</p>
         <a-button :href="`${sub.url}?format=page`" target="_blank" rel="noopener" class="share-btn">
           <ExternalLink :size="14" />预览分享页
         </a-button>

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -399,18 +400,56 @@ func (h *Handler) serveSubscription(w http.ResponseWriter, r *http.Request, toke
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	if r.URL.Query().Get("view") == "1" {
+		h.serveViewer(w, r, s, format, body)
+		return
+	}
 	hdr := w.Header()
 	hdr.Set("Content-Type", ctype)
 	hdr.Set("Cache-Control", "no-store")
 	hdr.Set("Subscription-Userinfo", sub.UserInfo(s))
 	hdr.Set("Profile-Update-Interval", strconv.Itoa(cfg.UpdateHours))
 	filename := "x-hub-" + s.Name
-	if format == sub.FormatShadowrocket {
-		filename += ".conf" // 便于客户端识别为配置文件
+	if format == sub.FormatShadowrocket || r.URL.Query().Get("download") == "1" {
+		filename += formatExt[format] // 分享页下载与 Shadowrocket 配置带扩展名，便于识别文件类型
 	}
 	hdr.Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(filename))
 	h.Log.Info("subscription fetched", "sub", s.ID, "format", format, "nodes", len(nodes), "ip", h.clientIP(r))
 	w.Write(body)
+}
+
+// 各格式的文件扩展名与在分享页中的名称。
+var (
+	formatExt  = map[sub.Format]string{sub.FormatMihomo: ".yaml", sub.FormatSingBox: ".json", sub.FormatShadowrocket: ".conf", sub.FormatBase64: ".txt"}
+	formatName = map[sub.Format]string{sub.FormatMihomo: "Mihomo", sub.FormatSingBox: "sing-box", sub.FormatShadowrocket: "Shadowrocket 分流配置", sub.FormatBase64: "通用（节点链接）"}
+)
+
+// serveViewer 在浏览器中显示订阅内容；通用格式解码为每行一条分享链接。
+func (h *Handler) serveViewer(w http.ResponseWriter, r *http.Request, s *store.Subscription, format sub.Format, body []byte) {
+	content := string(body)
+	if format == sub.FormatBase64 {
+		if dec, err := base64.StdEncoding.DecodeString(content); err == nil {
+			content = string(dec)
+		}
+	}
+	setPageHeaders(w)
+	err := share.RenderViewer(w, &share.Viewer{
+		Name: s.Name, Format: formatName[format], Content: content,
+		Download: r.URL.Path + "?format=" + string(format) + "&download=1", Back: r.URL.Path + "?format=page",
+	})
+	if err != nil {
+		h.Log.Warn("render subscription viewer", "sub", s.ID, "err", err)
+	}
+}
+
+// setPageHeaders 设置分享页与查看页的响应头：禁止缓存与收录，只允许内联样式与脚本。
+func setPageHeaders(w http.ResponseWriter) {
+	hdr := w.Header()
+	hdr.Set("Content-Type", "text/html; charset=utf-8")
+	hdr.Set("Cache-Control", "no-store")
+	hdr.Set("X-Robots-Tag", "noindex, nofollow")
+	hdr.Set("Referrer-Policy", "no-referrer")
+	hdr.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 }
 
 // baseClientKeywords 为只识别为通用格式、但不应收到分享页的客户端关键字（小写）。
@@ -437,7 +476,7 @@ func wantsSharePage(r *http.Request) bool {
 	return true
 }
 
-// serveSharePage 输出订阅分享页：用量、到期、各客户端一键导入与节点列表。
+// serveSharePage 输出订阅分享页：用量、到期、各格式订阅内容的查看与下载入口、节点列表。
 func (h *Handler) serveSharePage(w http.ResponseWriter, r *http.Request, s *store.Subscription, nodes []outNode) {
 	link := h.subscriptionURL(s.Token)
 	if link == "" {
@@ -449,7 +488,7 @@ func (h *Handler) serveSharePage(w http.ResponseWriter, r *http.Request, s *stor
 	}
 	p := &share.Page{
 		Name: s.Name, Status: "正常使用", StatusTone: "ok", SubURL: link, QR: share.QRCode(link),
-		Clients: share.Clients(link, s.Name, share.DetectDevice(r.UserAgent())), UpdateHours: h.Settings.Subscription().UpdateHours,
+		Formats: share.Formats(link), UpdateHours: h.Settings.Subscription().UpdateHours,
 		Used: share.HumanBytes(s.UsedUp + s.UsedDown), Expire: "永不", UsageTone: "",
 	}
 	switch s.State {
@@ -487,12 +526,7 @@ func (h *Handler) serveSharePage(w http.ResponseWriter, r *http.Request, s *stor
 	for _, n := range nodes {
 		p.Nodes = append(p.Nodes, share.NodeItem{Name: n.Name, ClashOnly: n.Dialer != "" || n.Link == ""})
 	}
-	hdr := w.Header()
-	hdr.Set("Content-Type", "text/html; charset=utf-8")
-	hdr.Set("Cache-Control", "no-store")
-	hdr.Set("X-Robots-Tag", "noindex, nofollow")
-	hdr.Set("Referrer-Policy", "no-referrer")
-	hdr.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	setPageHeaders(w)
 	if err := share.Render(w, p); err != nil {
 		h.Log.Warn("render share page", "sub", s.ID, "err", err)
 	}

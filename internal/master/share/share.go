@@ -1,13 +1,11 @@
-// Package share 渲染订阅分享页：使用者在浏览器中打开订阅链接时看到的用量、到期信息与各客户端一键导入入口。
+// Package share 渲染订阅分享页（用量、到期信息与各格式订阅内容的查看、下载入口）与订阅内容的查看页。
 package share
 
 import (
 	_ "embed"
-	"encoding/base64"
 	"fmt"
 	"html/template"
 	"io"
-	"net/url"
 	"strings"
 
 	"rsc.io/qr"
@@ -16,24 +14,36 @@ import (
 //go:embed page.html
 var pageHTML string
 
-var tmpl = template.Must(template.New("share").Parse(pageHTML))
+//go:embed viewer.html
+var viewerHTML string
 
-// Client 为一个客户端的导入方式。Import 为一键导入的 URL Scheme（为空表示只能复制链接），Link 为复制的订阅链接。
-type Client struct {
-	Name        string
-	Platforms   string
-	Import      template.URL
-	Link        string
-	Steps       string
-	Recommended bool
-	Extra       *Extra // 额外需要导入的链接（如 Shadowrocket 分流配置）
+var (
+	tmpl       = template.Must(template.New("share").Parse(pageHTML))
+	viewerTmpl = template.Must(template.New("viewer").Parse(viewerHTML))
+)
+
+// Format 为分享页中的一种订阅内容格式。
+type Format struct {
+	Name     string
+	Clients  string // 适用的客户端
+	Note     string // 使用提示，可为空
+	Link     string // 客户端使用的订阅链接
+	View     string // 在浏览器中查看
+	Download string // 下载文件
 }
 
-// Extra 为客户端额外需要导入的链接。
-type Extra struct {
-	Label string
-	Link  string
-	Steps string
+// Formats 返回各格式的订阅内容入口，subURL 为不带参数的订阅链接。
+func Formats(subURL string) []Format {
+	f := func(name, format, clients, note string) Format {
+		link := subURL + "?format=" + format
+		return Format{Name: name, Clients: clients, Note: note, Link: link, View: link + "&view=1", Download: link + "&download=1"}
+	}
+	return []Format{
+		f("Mihomo", "mihomo", "Clash Verge Rev、Mihomo Party、Clash Meta for Android、FlClash、Stash", ""),
+		f("sing-box", "singbox", "sing-box 官方客户端（SFI / SFA / SFM），需 1.12 及以上", ""),
+		f("通用", "base64", "Shadowrocket、v2rayN、v2rayNG、NekoBox 等", "Base64 编码的节点分享链接，查看时会解码为每行一条。"),
+		f("Shadowrocket 分流配置", "shadowrocket", "Shadowrocket", "只含分组与规则，不含节点：在「配置」页添加，节点仍需在首页用通用链接订阅。"),
+	}
 }
 
 // NodeItem 为页面中列出的节点。ClashOnly 表示只出现在 Clash 系与 sing-box 订阅中。
@@ -56,77 +66,9 @@ type Page struct {
 	ExpireTone  string
 	SubURL      string
 	QR          template.HTML
-	Clients     []Client
+	Formats     []Format
 	Nodes       []NodeItem
 	UpdateHours int
-}
-
-// Device 为按 User-Agent 推断的设备类型。
-type Device string
-
-const (
-	DeviceIOS     Device = "ios"
-	DeviceAndroid Device = "android"
-	DeviceDesktop Device = "desktop"
-)
-
-// DetectDevice 按 User-Agent 推断设备类型，用于推荐客户端。
-func DetectDevice(ua string) Device {
-	ua = strings.ToLower(ua)
-	switch {
-	case strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad"):
-		return DeviceIOS
-	case strings.Contains(ua, "android"):
-		return DeviceAndroid
-	}
-	return DeviceDesktop
-}
-
-// Clients 返回各客户端的导入方式，与设备匹配的排在前面并标记为推荐。
-func Clients(subURL, name string, device Device) []Client {
-	q := url.QueryEscape(subURL)
-	n := url.QueryEscape(name)
-	all := []struct {
-		Client
-		devices []Device
-	}{
-		{Client{Name: "Clash Verge Rev / Mihomo Party", Platforms: "Windows · macOS · Linux",
-			Import: template.URL("clash://install-config?url=" + q + "&name=" + n), Link: subURL,
-			Steps: "点击「一键导入」，在客户端中确认；或在「订阅 / 配置」中粘贴链接导入。"}, []Device{DeviceDesktop}},
-		{Client{Name: "Clash Meta for Android / FlClash", Platforms: "Android",
-			Import: template.URL("clash://install-config?url=" + q + "&name=" + n), Link: subURL,
-			Steps: "点击「一键导入」；或在「配置」中新建，选择从 URL 导入并粘贴链接。"}, []Device{DeviceAndroid}},
-		{Client{Name: "Shadowrocket", Platforms: "iOS",
-			Import: template.URL("shadowrocket://add/sub://" + base64.StdEncoding.EncodeToString([]byte(subURL)) + "?remark=" + n), Link: subURL,
-			Steps: "点击「一键导入」添加节点订阅；或在首页右上角「+」中选择 Subscribe 并粘贴链接。",
-			Extra: &Extra{Label: "分流配置", Link: subURL + "?format=shadowrocket",
-				Steps: "需要分流时，在底部「配置」页右上角「+」粘贴此链接并下载，点击它选择「使用配置」，再把首页的「全局路由」设为「配置」。不要加在首页。"}},
-			[]Device{DeviceIOS}},
-		{Client{Name: "Stash", Platforms: "iOS · macOS",
-			Import: template.URL("stash://install-config?url=" + q + "&name=" + n), Link: subURL,
-			Steps: "点击「一键导入」；或在「配置」中从 URL 下载配置。"}, []Device{DeviceIOS}},
-		{Client{Name: "sing-box", Platforms: "iOS · Android · macOS",
-			Import: template.URL("sing-box://import-remote-profile?url=" + q + "#" + url.PathEscape(name)), Link: subURL,
-			Steps: "需要 1.12 及以上版本。点击「一键导入」；或在 Profiles 中新建远程配置并粘贴链接。"}, []Device{DeviceIOS, DeviceAndroid, DeviceDesktop}},
-		{Client{Name: "v2rayN / v2rayNG / NekoBox", Platforms: "Windows · Android",
-			Link: subURL, Steps: "复制链接，在「订阅分组 / 订阅设置」中添加后更新订阅。"}, nil},
-	}
-	var first, rest []Client
-	for _, c := range all {
-		matched := false
-		for _, d := range c.devices {
-			if d == device {
-				matched = true
-			}
-		}
-		if matched && len(first) < 2 {
-			c.Recommended = true
-			first = append(first, c.Client)
-		} else {
-			rest = append(rest, c.Client)
-		}
-	}
-	return append(first, rest...)
 }
 
 // QRCode 把文本编码为二维码 SVG（含 2 格留白）。
@@ -164,4 +106,21 @@ func HumanBytes(b int64) string {
 // Render 输出分享页。
 func Render(w io.Writer, p *Page) error {
 	return tmpl.Execute(w, p)
+}
+
+// Viewer 为订阅内容查看页数据。
+type Viewer struct {
+	Name     string // 订阅名称
+	Format   string // 格式名称
+	Content  string
+	Lines    int
+	Download string
+	Back     string // 返回分享页
+}
+
+// RenderViewer 输出订阅内容查看页。
+func RenderViewer(w io.Writer, v *Viewer) error {
+	v.Content = strings.TrimRight(v.Content, "\n")
+	v.Lines = strings.Count(v.Content, "\n") + 1
+	return viewerTmpl.Execute(w, v)
 }

@@ -62,15 +62,12 @@ h1 { margin: 0; font-size: clamp(40px, 9vw, 72px); line-height: 1; letter-spacin
 
 h2 { margin: 40px 0 6px; font-size: 22px; letter-spacing: -0.02em; }
 .lead { margin: 0 0 16px; font-size: 13.5px; color: var(--text-2); }
-.clients { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
-.client { display: flex; flex-direction: column; gap: 10px; }
-.client.rec { border-color: var(--text); }
-.c-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.c-name { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
-.c-plat { margin: 2px 0 0; font: 12px var(--mono); color: var(--text-3); }
-.rec-tag { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--ink); color: var(--lime); font-size: 11px; }
-.steps { margin: 0; font-size: 13px; color: var(--text-2); }
-.acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+.formats { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 12px; }
+.format { display: flex; flex-direction: column; gap: 6px; }
+.f-name { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.f-clients { margin: 0; font-size: 12.5px; color: var(--text-3); }
+.f-note { margin: 2px 0 0; font-size: 12.5px; color: var(--text-2); }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 10px; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 14px;
   border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
@@ -78,12 +75,9 @@ h2 { margin: 40px 0 6px; font-size: 22px; letter-spacing: -0.02em; }
 }
 .btn:hover { border-color: var(--text-3); }
 .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
-@media (prefers-color-scheme: dark) { .btn.primary { background: var(--lime); border-color: var(--lime); color: var(--ink); } .rec-tag { background: var(--lime); color: var(--ink); } .client.rec { border-color: var(--lime); } }
+@media (prefers-color-scheme: dark) { .btn.primary { background: var(--lime); border-color: var(--lime); color: var(--ink); } }
 .btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .btn.done { border-color: var(--ok); color: var(--ok); }
-.extra { padding-top: 10px; border-top: 1px dashed var(--border); }
-.extra p { margin: 0 0 8px; font-size: 12.5px; color: var(--text-2); }
-.extra strong { color: var(--text); }
 
 .link { display: flex; gap: 8px; align-items: stretch; }
 .link code { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); font: 12.5px var(--mono); overflow-wrap: anywhere; }
@@ -118,36 +112,29 @@ footer { margin-top: 40px; font-size: 12.5px; color: var(--text-3); }
     </div>
     <div class="card qr">
       {{.QR}}
-      <p>用手机客户端扫码导入</p>
+      <p>用手机客户端扫码订阅</p>
     </div>
   </section>
 
-  <h2>导入到客户端</h2>
-  <p class="lead">点击「一键导入」会打开已安装的客户端；未安装或没有反应时，复制链接到客户端中手动添加。</p>
-  <div class="clients">
-    {{range .Clients}}
-    <article class="card client{{if .Recommended}} rec{{end}}">
-      <div class="c-head">
-        <div><p class="c-name">{{.Name}}</p><p class="c-plat">{{.Platforms}}</p></div>
-        {{if .Recommended}}<span class="rec-tag">推荐</span>{{end}}
-      </div>
-      <p class="steps">{{.Steps}}</p>
+  <h2>订阅内容</h2>
+  <p class="lead">各客户端使用的订阅内容。可以在浏览器中查看，或下载为文件导入。</p>
+  <div class="formats">
+    {{range .Formats}}
+    <article class="card format">
+      <p class="f-name">{{.Name}}</p>
+      <p class="f-clients">{{.Clients}}</p>
+      {{if .Note}}<p class="f-note">{{.Note}}</p>{{end}}
       <div class="acts">
-        {{if .Import}}<a class="btn primary" href="{{.Import}}"><svg viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>一键导入</a>{{end}}
-        <button class="btn{{if not .Import}} primary{{end}}" type="button" data-copy="{{.Link}}"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制链接</span></button>
+        <a class="btn primary" href="{{.View}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>查看</a>
+        <a class="btn" href="{{.Download}}" download><svg viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>下载</a>
+        <button class="btn" type="button" data-copy="{{.Link}}"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制链接</span></button>
       </div>
-      {{with .Extra}}
-      <div class="extra">
-        <p><strong>{{.Label}}</strong>　{{.Steps}}</p>
-        <button class="btn" type="button" data-copy="{{.Link}}"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制{{.Label}}链接</span></button>
-      </div>
-      {{end}}
     </article>
     {{end}}
   </div>
 
   <h2>订阅链接</h2>
-  <p class="lead">适用于其他客户端，会按客户端自动返回对应格式。</p>
+  <p class="lead">通用的订阅链接，客户端导入时会自动获得对应格式；也可以用手机客户端扫描上方二维码。</p>
   <div class="link">
     <code>{{.SubURL}}</code>
     <button class="btn" type="button" data-copy="{{.SubURL}}"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制</span></button>

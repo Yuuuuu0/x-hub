@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>{{.Format}} · {{.Name}}</title>
+<style>
+:root {
+  --bg: #f4f3ee; --surface: #fff; --surface-2: #f8f7f3; --border: #e3e1d9; --text: #0b0d12; --text-2: #4a4d57; --text-3: #8a8c94;
+  --lime: #c6ff3d; --ink: #0b0d12; --ok: #17a34a; --code-bg: #0b0d12; --code: #d8f7a0; --gutter: #4b505c;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #090a0d; --surface: #111318; --surface-2: #161920; --border: #22262f; --text: #eef0f3; --text-2: #a9adb8; --text-3: #6b707c; --ok: #4ade80; --code-bg: #111318; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif; }
+header {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border);
+}
+.title { flex: 1; min-width: 0; }
+.title h1 { margin: 0; font-size: 17px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title p { margin: 0; font: 12px var(--mono); color: var(--text-3); }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13px;
+  text-decoration: none; cursor: pointer; transition: border-color .15s;
+}
+.btn:hover { border-color: var(--text-3); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+@media (prefers-color-scheme: dark) { .btn.primary { background: var(--lime); border-color: var(--lime); color: var(--ink); } }
+.btn.on, .btn.done { border-color: var(--ok); color: var(--ok); }
+.btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+main { padding: 16px; }
+pre {
+  margin: 0; padding: 16px 18px; border-radius: 12px; background: var(--code-bg); color: var(--code); border: 1px solid #22262f;
+  font: 12.5px/1.7 var(--mono); overflow-x: auto; tab-size: 2; min-height: calc(100vh - 120px);
+}
+pre.wrap { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+  <a class="btn" href="{{.Back}}"><svg viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>返回</a>
+  <div class="title">
+    <h1>{{.Format}}</h1>
+    <p>{{.Name}} · {{.Lines}} 行</p>
+  </div>
+  <div class="acts">
+    <button class="btn" type="button" id="wrap"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><path d="m16 16-2 2 2 2"/><path d="M3 18h7"/></svg>自动换行</button>
+    <button class="btn" type="button" id="copy"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制全部</span></button>
+    <a class="btn primary" href="{{.Download}}" download><svg viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>下载</a>
+  </div>
+</header>
+<main><pre id="content">{{.Content}}</pre></main>
+<script>
+const pre = document.getElementById('content')
+document.getElementById('wrap').addEventListener('click', (e) => {
+  e.currentTarget.classList.toggle('on', pre.classList.toggle('wrap'))
+})
+// 复制：优先使用剪贴板 API，非安全上下文（如 http）时退回 execCommand。
+document.getElementById('copy').addEventListener('click', async (e) => {
+  const btn = e.currentTarget
+  let ok = false
+  try {
+    await navigator.clipboard.writeText(pre.textContent)
+    ok = true
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = pre.textContent
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try { ok = document.execCommand('copy') } catch {}
+    ta.remove()
+  }
+  const label = btn.querySelector('span')
+  label.textContent = ok ? '已复制' : '复制失败'
+  btn.classList.toggle('done', ok)
+  setTimeout(() => { label.textContent = '复制全部'; btn.classList.remove('done') }, 1800)
+})
+</script>
+</body>
+</html>

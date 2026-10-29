@@ -190,8 +190,21 @@ func TestSharePage(t *testing.T) {
 	rec := fetch(browser, html, "")
 	body := rec.Body.String()
 	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") || !strings.Contains(body, "朋友A") ||
-		!strings.Contains(body, "shadowrocket://add/sub://") || !strings.Contains(body, "<svg") || !strings.Contains(body, "推荐") {
+		!strings.Contains(body, "format=mihomo&amp;view=1") || !strings.Contains(body, "format=singbox&amp;download=1") || !strings.Contains(body, "<svg") {
 		t.Fatalf("share page: %s %.300s", rec.Header().Get("Content-Type"), body)
+	}
+	// 查看：HTML 页面内显示配置原文；通用格式解码为分享链接。
+	if rec := fetch(browser, html, "?format=mihomo&view=1"); !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") ||
+		!strings.Contains(rec.Body.String(), "proxy-groups:") {
+		t.Fatalf("mihomo view: %.300s", rec.Body.String())
+	}
+	if rec := fetch(browser, html, "?format=base64&view=1"); !strings.Contains(rec.Body.String(), "vless://") {
+		t.Fatalf("base64 view must decode links: %.300s", rec.Body.String())
+	}
+	// 下载：附件带扩展名。
+	if rec := fetch(browser, html, "?format=singbox&download=1"); !strings.Contains(rec.Header().Get("Content-Disposition"), ".json") ||
+		!strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("download: %v", rec.Header())
 	}
 	for _, c := range []struct{ ua, accept, query string }{
 		{browser, html, "?format=base64"},
