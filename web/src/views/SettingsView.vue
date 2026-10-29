@@ -528,7 +528,7 @@ docker compose up -d</pre>
 
 <style scoped>
 .page {
-  max-width: 880px;
+  max-width: 960px;
 }
 
 .hero {

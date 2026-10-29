@@ -103,3 +103,10 @@ body {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* 页面内容容器：宽屏下铺满主区域，超宽屏居中。 */
+.page {
+  width: 100%;
+  max-width: 1920px;
+  margin-inline: auto;
+}

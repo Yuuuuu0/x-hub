@@ -506,9 +506,6 @@ async function copyPreview() {
 </template>
 
 <style scoped>
-.page {
-  max-width: 1200px;
-}
 .hero {
   display: flex;
   align-items: flex-end;

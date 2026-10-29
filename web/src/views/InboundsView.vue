@@ -176,9 +176,6 @@ function remove(i: InboundItem) {
 </template>
 
 <style scoped>
-.page {
-  max-width: 1200px;
-}
 .hero {
   display: flex;
   align-items: flex-end;
@@ -206,8 +203,9 @@ h1 {
   gap: 8px;
 }
 .groups {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 640px), 1fr));
+  align-items: start;
   gap: 18px;
 }
 .group {

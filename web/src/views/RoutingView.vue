@@ -240,9 +240,6 @@ const BEHAVIOR: Record<string, string> = { domain: '域名', ipcidr: 'IP 段', c
 </template>
 
 <style scoped>
-.page {
-  max-width: 1200px;
-}
 .hero {
   display: flex;
   align-items: flex-end;

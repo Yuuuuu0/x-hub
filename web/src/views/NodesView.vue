@@ -193,10 +193,6 @@ function remove(n: NodeItem) {
 </template>
 
 <style scoped>
-.page {
-  max-width: 1440px;
-}
-
 .hero {
   display: flex;
   align-items: flex-end;
