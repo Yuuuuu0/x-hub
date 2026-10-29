@@ -288,7 +288,7 @@ async function saveAccount() {
 <template>
   <section class="page">
     <header class="hero">
-      <p class="eyebrow mono">SETTINGS</p>
+      <p class="eyebrow mono">SETTINGS<span v-if="session.version" class="ver"> · {{ session.version }}</span></p>
       <h1>设置</h1>
     </header>
 
@@ -535,6 +535,10 @@ docker compose up -d</pre>
   margin-bottom: 20px;
 }
 
+.eyebrow .ver {
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
 .eyebrow {
   margin: 0 0 6px;
   font-size: 12px;

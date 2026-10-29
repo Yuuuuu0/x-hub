@@ -1,6 +1,6 @@
 name: Release
 
-# 推送到 main 构建 edge 镜像；推送 v* 标签构建版本镜像与 latest，并发布 GitHub Release。
+# 推送到 main 构建 latest 镜像；推送 v* 标签构建版本镜像，并发布 GitHub Release。
 on:
   push:
     branches: [main]
@@ -20,6 +20,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 版本号：标签构建用标签名，main 构建用 7 位短哈希
+      - id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
@@ -33,10 +42,10 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=edge,branch=main
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
 
       # Dockerfile 在构建平台上交叉编译，多架构无需 QEMU。
       - uses: docker/build-push-action@v7
@@ -46,7 +55,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('edge-{0}', github.sha) }}
+          build-args: VERSION=${{ steps.ver.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

@@ -50,7 +50,6 @@ async function logout() {
         </a-tooltip>
         <div class="who">
           <span class="who-name">{{ session.username }}</span>
-          <span class="who-ver mono">{{ session.version }}</span>
         </div>
         <a-tooltip title="退出登录" placement="right">
           <button class="icon-btn" type="button" aria-label="退出登录" @click="logout">
@@ -183,11 +182,7 @@ async function logout() {
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.who-ver {
-  font-size: 11px;
-  color: var(--text-3);
+  white-space: nowrap;
 }
 
 .icon-btn {
