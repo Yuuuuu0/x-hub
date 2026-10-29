@@ -46,3 +46,5 @@ git push origin v0.1.0
 ```
 
 镜像同时提供 `linux/amd64` 与 `linux/arm64`。含 `-` 的标签（如 `v0.2.0-rc.1`）发布为预发布版本。
+
+被控端使用独立的版本号：最后一次改动被控端相关代码（`cmd/agent`、`internal/agent`、`internal/shared`、`internal/version`、`go.mod`、`go.sum`）的提交短哈希，由 `make print-agent-version` 计算并在构建时注入主控（`version.AgentVersion`）与被控端（`version.Version`）。面板据此判断已接入的被控端是否需要更新，只改主控或界面时不会提示。

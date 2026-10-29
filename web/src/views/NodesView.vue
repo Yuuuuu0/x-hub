@@ -18,7 +18,7 @@ const POLL_FAST_MS = 2000
 
 const nodes = ref<NodeItem[]>([])
 const countries = ref<CountryItem[]>([])
-const masterVersion = ref('')
+const agentVersion = ref('') // 主控分发的被控端版本
 const loaded = ref(false)
 const busy = ref<Record<number, boolean>>({})
 
@@ -31,9 +31,9 @@ const showBatch = ref(false)
 
 async function load() {
   try {
-    const r = await api.get<{ nodes: NodeItem[]; masterVersion: string; countries: CountryItem[] }>('nodes')
+    const r = await api.get<{ nodes: NodeItem[]; agentVersion: string; countries: CountryItem[] }>('nodes')
     nodes.value = r.nodes
-    masterVersion.value = r.masterVersion
+    agentVersion.value = r.agentVersion
     countries.value = r.countries
   } catch (e: any) {
     if (!loaded.value) message.error(e.message)
@@ -166,7 +166,7 @@ function remove(n: NodeItem) {
         v-for="n in nodes"
         :key="n.id"
         :node="n"
-        :master-version="masterVersion"
+        :agent-version="agentVersion"
         :busy="!!busy[n.id]"
         @edit="openForm(n)"
         @install="open(n, 'install')"

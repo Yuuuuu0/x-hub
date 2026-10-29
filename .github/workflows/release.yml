@@ -19,8 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 计算被控端版本需要完整提交历史
 
-      # 版本号：标签构建用标签名，main 构建用 7 位短哈希
+      # 版本号：标签构建用标签名，main 构建用 7 位短哈希；被控端版本为最后一次改动被控端代码的提交
       - id: ver
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -28,6 +30,7 @@ jobs:
           else
             echo "version=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
+          echo "agent=$(make -s print-agent-version)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -55,7 +58,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ steps.ver.outputs.version }}
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+            AGENT_VERSION=${{ steps.ver.outputs.agent }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -64,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v7
         with:
@@ -84,11 +91,12 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           make web
-          LDFLAGS="-s -w -X github.com/Yuuuuu0/x-hub/internal/version.Version=${VERSION}"
+          AGENT_VERSION="$(make -s print-agent-version)"
+          PKG=github.com/Yuuuuu0/x-hub/internal/version
           mkdir -p release
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o release/xhub-agent-linux-$arch ./cmd/agent
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" -o release/xhub-master-linux-$arch ./cmd/master
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X $PKG.Version=${AGENT_VERSION}" -o release/xhub-agent-linux-$arch ./cmd/agent
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X $PKG.Version=${VERSION} -X $PKG.AgentVersion=${AGENT_VERSION}" -o release/xhub-master-linux-$arch ./cmd/master
           done
           cd release && sha256sum -- * > SHA256SUMS
 

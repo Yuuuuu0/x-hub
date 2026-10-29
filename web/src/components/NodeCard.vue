@@ -17,7 +17,7 @@ import type { NodeItem } from '../lib/api'
 import SyncChip from './SyncChip.vue'
 import { ago, bytes, bytesParts, duration, percent } from '../lib/format'
 
-const props = defineProps<{ node: NodeItem; masterVersion: string; busy: boolean }>()
+const props = defineProps<{ node: NodeItem; agentVersion: string; busy: boolean }>()
 const emit = defineEmits<{
   synced: []
   edit: []
@@ -78,7 +78,7 @@ const xrayState = computed(() => {
   return { text: `Xray ${x.version} · 已停止`, tone: 'idle' }
 })
 
-const agentOutdated = computed(() => online.value && props.node.agentVersion && props.node.agentVersion !== props.masterVersion)
+const agentOutdated = computed(() => online.value && props.node.agentVersion && props.node.agentVersion !== props.agentVersion)
 
 function meterTone(p: number) {
   return p >= 90 ? 'bad' : p >= 75 ? 'warn' : ''
@@ -196,7 +196,7 @@ function onMenu({ key }: { key: string | number }) {
           <span v-if="online && hb">已运行 {{ duration(hb.uptime) }}</span>
           <span v-if="online && hb">累计 ↓{{ bytes(hb.netRx) }} ↑{{ bytes(hb.netTx) }}</span>
           <span v-if="node.xrayPinnedVersion">锁定 {{ node.xrayPinnedVersion }}</span>
-          <a-tooltip v-if="agentOutdated" :title="`主控版本为 ${masterVersion}，可通过重装命令更新被控端`">
+          <a-tooltip v-if="agentOutdated" :title="`最新被控端版本为 ${agentVersion}，可通过重装命令更新`">
             <span class="outdated">Agent {{ node.agentVersion }}</span>
           </a-tooltip>
         </p>

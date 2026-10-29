@@ -115,7 +115,7 @@ func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
 	for _, n := range nodes {
 		out = append(out, nodeView{Node: n, Runtime: h.Hub.State(n.ID), SyncState: h.Syncer.State(n), NetPeriod: h.netUsage(n, now), Geo: geoOf(n)})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": out, "masterVersion": version.Version, "countries": geo.List()})
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": out, "agentVersion": version.AgentVersion, "countries": geo.List()})
 }
 
 type nodeInput = store.NodeSettings
