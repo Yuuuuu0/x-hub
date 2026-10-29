@@ -134,6 +134,7 @@ export interface AllSettings {
   access: AccessSettings
   xray: XraySettings
   security: SecuritySettings
+  subscription: SubscriptionSettings
   selfSignedFingerprint?: string
 }
 
@@ -210,7 +211,19 @@ export interface Subscription {
   enabled: boolean
   state: 'active' | 'exceeded' | 'expired'
   allInbounds: boolean
+  inboundIds: number[]
+  url: string
+  limitBytes: number
+  expireAt: number
+  usedUp: number
+  usedDown: number
   createdAt: number
+}
+
+export interface SubscriptionSettings {
+  path: string
+  updateHours: number
+  nameTemplate: string
 }
 
 export interface ShareLink {

@@ -1,22 +1,41 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
-import { KeyRound, Pencil, Plus, Trash2 } from 'lucide-vue-next'
-import { api, type Subscription } from '../lib/api'
+import { ChevronDown, KeyRound, Link2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { api, type InboundItem, type Subscription } from '../lib/api'
 import { datetime } from '../lib/format'
+import SubLinkModal from '../components/SubLinkModal.vue'
 
 const subs = ref<Subscription[]>([])
 const loaded = ref(false)
 const busy = ref<Record<number, boolean>>({})
 
+const inbounds = ref<InboundItem[]>([])
 const showForm = ref(false)
 const editing = ref<Subscription | null>(null)
-const form = reactive({ name: '', note: '' })
+const form = reactive({ name: '', note: '', allInbounds: true, inboundIds: [] as number[] })
 const saving = ref(false)
+const linkSub = ref<Subscription | null>(null)
+const showLink = ref(false)
+
+/** 入站按服务器分组，供范围选择。 */
+const inboundOptions = computed(() => {
+  const groups = new Map<string, { label: string; options: { value: number; label: string }[] }>()
+  for (const i of inbounds.value) {
+    if (!groups.has(i.nodeName)) groups.set(i.nodeName, { label: i.nodeName, options: [] })
+    groups.get(i.nodeName)!.options.push({ value: i.id, label: `${i.nodeName} · ${i.remark || '未命名'} :${i.port}` })
+  }
+  return [...groups.values()]
+})
 
 async function load() {
   try {
-    subs.value = (await api.get<{ subscriptions: Subscription[] }>('subscriptions')).subscriptions
+    const [a, b] = await Promise.all([
+      api.get<{ subscriptions: Subscription[] }>('subscriptions'),
+      api.get<{ inbounds: InboundItem[] }>('inbounds'),
+    ])
+    subs.value = a.subscriptions
+    inbounds.value = b.inbounds
   } catch (e: any) {
     message.error(e.message)
   } finally {
@@ -30,10 +49,25 @@ function openForm(s: Subscription | null) {
   editing.value = s
   form.name = s?.name ?? ''
   form.note = s?.note ?? ''
+  form.allInbounds = s?.allInbounds ?? true
+  form.inboundIds = [...(s?.inboundIds ?? [])]
   showForm.value = true
 }
 
+function openLink(s: Subscription) {
+  linkSub.value = s
+  showLink.value = true
+}
+
+function scopeText(s: Subscription) {
+  return s.allInbounds ? '全部入站' : `${s.inboundIds.length} 个入站`
+}
+
 async function save() {
+  if (!form.allInbounds && !form.inboundIds.length) {
+    message.error('请至少选择一个入站，或选择「全部入站」')
+    return
+  }
   saving.value = true
   try {
     if (editing.value) await api.put(`subscriptions/${editing.value.id}`, { ...form, enabled: editing.value.enabled })
@@ -61,7 +95,27 @@ async function toggle(s: Subscription, enabled: boolean) {
   }
 }
 
-function reset(s: Subscription) {
+function onReset(s: Subscription, key: string) {
+  if (key === 'token') resetToken(s)
+  else resetCredentials(s)
+}
+
+function resetToken(s: Subscription) {
+  Modal.confirm({
+    title: `重置「${s.name}」的订阅链接？`,
+    content: '旧订阅链接立即失效，需要把新链接重新发给使用者；已导入的节点仍可继续使用。',
+    okText: '重置链接',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      await api.post(`subscriptions/${s.id}/reset-token`)
+      message.success('订阅链接已重置')
+      load()
+    },
+  })
+}
+
+function resetCredentials(s: Subscription) {
   Modal.confirm({
     title: `重置「${s.name}」的凭据？`,
     content: '将生成新的 UUID，已导入旧配置的客户端会立即失效，需要重新导入。',
@@ -104,7 +158,7 @@ function remove(s: Subscription) {
         新建订阅
       </a-button>
     </header>
-    <p class="lead muted">每个订阅代表一位使用者，拥有独立凭据，自动下发到所有入站。</p>
+    <p class="lead muted">每个订阅代表一位使用者，拥有独立凭据与订阅链接，凭据自动下发到其范围内的所有入站。</p>
 
     <a-skeleton v-if="!loaded" active />
     <a-empty v-else-if="!subs.length" description="还没有订阅" />
@@ -123,13 +177,22 @@ function remove(s: Subscription) {
             <a-typography-text :copyable="{ text: s.uuid }">{{ s.uuid }}</a-typography-text>
           </dd>
           <dt>范围</dt>
-          <dd>{{ s.allInbounds ? '全部入站' : '指定入站' }}</dd>
+          <dd>{{ scopeText(s) }}</dd>
           <dt>创建于</dt>
           <dd class="mono">{{ datetime(s.createdAt) }}</dd>
         </dl>
         <footer class="acts">
+          <a-button size="small" type="primary" @click="openLink(s)"><Link2 :size="13" class="ico" />订阅链接</a-button>
           <a-button size="small" @click="openForm(s)"><Pencil :size="13" class="ico" />编辑</a-button>
-          <a-button size="small" @click="reset(s)"><KeyRound :size="13" class="ico" />重置凭据</a-button>
+          <a-dropdown trigger="click">
+            <a-button size="small">重置<ChevronDown :size="13" class="ico-r" /></a-button>
+            <template #overlay>
+              <a-menu @click="({ key }: any) => onReset(s, key)">
+                <a-menu-item key="token"><span class="mi"><RefreshCw :size="13" />重置订阅链接</span></a-menu-item>
+                <a-menu-item key="credentials"><span class="mi"><KeyRound :size="13" />重置连接凭据</span></a-menu-item>
+              </a-menu>
+            </template>
+          </a-dropdown>
           <a-button size="small" danger class="del" @click="remove(s)"><Trash2 :size="13" /></a-button>
         </footer>
       </article>
@@ -143,8 +206,18 @@ function remove(s: Subscription) {
         <a-form-item label="备注">
           <a-textarea v-model:value="form.note" :maxlength="200" :auto-size="{ minRows: 2, maxRows: 4 }" />
         </a-form-item>
+        <a-form-item label="入站范围" extra="「全部入站」会自动包含之后新建的入站。">
+          <a-radio-group v-model:value="form.allInbounds" button-style="solid">
+            <a-radio-button :value="true">全部入站</a-radio-button>
+            <a-radio-button :value="false">指定入站</a-radio-button>
+          </a-radio-group>
+        </a-form-item>
+        <a-form-item v-if="!form.allInbounds" label="可使用的入站">
+          <a-select v-model:value="form.inboundIds" mode="multiple" :options="inboundOptions" placeholder="选择入站" not-found-content="还没有入站" />
+        </a-form-item>
       </a-form>
     </a-modal>
+    <SubLinkModal v-model:open="showLink" :sub="linkSub" />
   </section>
 </template>
 
@@ -258,6 +331,14 @@ h3 {
 }
 .ico {
   margin-right: 5px;
+}
+.ico-r {
+  margin-left: 4px;
+}
+.mi {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .form {
   margin-top: 16px;

@@ -32,10 +32,15 @@ const xray = reactive({ defaultVersion: undefined as string | undefined, maxVers
 const releases = ref<Release[]>([])
 const releasesLoading = ref(false)
 
+const subSettings = reactive({ path: '', updateHours: 12, nameTemplate: '' })
+const namePreview = computed(() =>
+  subSettings.nameTemplate.replace(/\{node\}/g, '东京-01').replace(/\{remark\}/g, '主力').replace(/\{port\}/g, '443').replace(/\s+/g, ' ').trim(),
+)
+
 const sessionHours = ref(168)
 const account = reactive({ username: '', currentPassword: '', newPassword: '', confirm: '' })
 
-const saving = reactive({ access: false, xray: false, security: false, account: false })
+const saving = reactive({ access: false, xray: false, security: false, account: false, sub: false })
 
 async function load() {
   const s = await api.get<AllSettings>('settings')
@@ -46,6 +51,7 @@ async function load() {
   xray.defaultVersion = s.xray.defaultVersion || undefined
   xray.maxVersion = s.xray.maxVersion || undefined
   sessionHours.value = s.security.sessionHours
+  Object.assign(subSettings, s.subscription)
   account.username = session.username
   loaded.value = true
 }
@@ -70,10 +76,25 @@ const releaseOptions = computed(() =>
   releases.value.map((r) => ({ value: r.tag, label: r.prerelease ? `${r.tag}（预发布）` : r.tag })),
 )
 
-function randomPath() {
+function randomString(n: number) {
   const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  const buf = crypto.getRandomValues(new Uint8Array(12))
-  access.panelPath = Array.from(buf, (b) => chars[b % chars.length]).join('')
+  return Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => chars[b % chars.length]).join('')
+}
+
+function randomPath() {
+  access.panelPath = randomString(12)
+}
+
+async function saveSub() {
+  saving.sub = true
+  try {
+    Object.assign(subSettings, await api.put('settings/subscription', subSettings))
+    message.success('订阅设置已保存')
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    saving.sub = false
+  }
 }
 
 function fillCloudflare() {
@@ -271,6 +292,32 @@ async function saveAccount() {
           </div>
           <div class="actions">
             <a-button type="primary" size="large" html-type="submit" :loading="saving.xray">保存 Xray 设置</a-button>
+          </div>
+        </a-form>
+      </a-tab-pane>
+
+      <a-tab-pane key="subscription" tab="订阅">
+        <a-form layout="vertical" class="form" @submit.prevent="saveSub">
+          <div class="group">
+            <h2>订阅链接</h2>
+            <a-form-item label="订阅路径" extra="订阅链接形如 公开访问地址/订阅路径/令牌。修改后已分发的订阅链接全部失效。">
+              <a-input v-model:value="subSettings.path" class="mono" addon-before="/">
+                <template #suffix>
+                  <a-tooltip title="随机生成">
+                    <Shuffle :size="15" class="clickable" @click="subSettings.path = randomString(8)" />
+                  </a-tooltip>
+                </template>
+              </a-input>
+            </a-form-item>
+            <a-form-item label="自动更新间隔（小时）" extra="通过 profile-update-interval 告知客户端。">
+              <a-input-number v-model:value="subSettings.updateHours" :min="1" :max="168" class="num" />
+            </a-form-item>
+            <a-form-item label="节点名称模板" :extra="`可用变量 {node} {remark} {port}。预览：${namePreview || '（空）'}`">
+              <a-input v-model:value="subSettings.nameTemplate" class="mono" placeholder="{node} {remark}" />
+            </a-form-item>
+          </div>
+          <div class="actions">
+            <a-button type="primary" size="large" html-type="submit" :loading="saving.sub">保存订阅设置</a-button>
           </div>
         </a-form>
       </a-tab-pane>

@@ -31,12 +31,16 @@ const PRESETS = [
   { value: 'ss2022', label: 'Shadowsocks 2022', disabled: true },
 ]
 
+// 第三方 Reality 客户端上报的版本号很低（Mihomo 固定为 1.8.2），而 Xray v26.3.27 之后的版本
+// 默认拒绝低于 26.3.27 的客户端，因此兼容模式把 minClientVer 设为 1.8.0。
+const COMPAT_CLIENT_VER = '1.8.0'
+
 function blankSpec(): InboundSpec {
   return {
     network: 'tcp',
     security: 'reality',
     vless: { flow: 'xtls-rprx-vision' },
-    reality: { target: 'dl.google.com:443', serverNames: ['dl.google.com'], privateKey: '', publicKey: '', shortIds: [], fingerprint: 'chrome', spiderX: '/', minClientVer: '' },
+    reality: { target: 'dl.google.com:443', serverNames: ['dl.google.com'], privateKey: '', publicKey: '', shortIds: [], fingerprint: 'chrome', spiderX: '/', minClientVer: COMPAT_CLIENT_VER },
     sniffing: true,
   }
 }
@@ -66,6 +70,10 @@ const nodeOptions = computed(() => props.nodes.map((n) => ({ value: n.id, label:
 const nodeOnline = computed(() => props.nodes.find((n) => n.id === form.nodeId)?.runtime.online ?? false)
 const targetOptions = computed(() => TARGETS.map((t) => ({ value: `${t}:443` })))
 const risky = computed(() => form.spec.reality.serverNames.filter(riskySNI))
+const compat = computed({
+  get: () => !!form.spec.reality.minClientVer,
+  set: (v) => (form.spec.reality.minClientVer = v ? COMPAT_CLIENT_VER : ''),
+})
 
 function randomPort() {
   form.port = 10000 + Math.floor(Math.random() * 50000)
@@ -243,6 +251,12 @@ async function save() {
             <a-button @click="addShortId"><Plus :size="15" class="ico" />添加</a-button>
           </div>
         </a-form-item>
+        <a-form-item
+          label="兼容第三方客户端"
+          extra="Mihomo / Clash Verge / sing-box 等非 Xray 客户端需要开启，否则会被新版 Xray 拒绝连接。Xray 提示放宽该限制会增加服务器被识别的概率；只使用 Xray 内核客户端（v2rayN 等）时可关闭。"
+        >
+          <a-switch v-model:checked="compat" />
+        </a-form-item>
         <div class="row">
           <a-form-item label="客户端指纹（fp）">
             <a-select v-model:value="form.spec.reality.fingerprint" :options="FINGERPRINTS.map((v) => ({ value: v }))" />
@@ -265,7 +279,7 @@ async function save() {
           </div>
           <a-form-item
             label="最低客户端版本（minClientVer）"
-            extra="留空使用 Xray 默认值（v26.3.27 起默认要求客户端不低于 26.3.27）。第三方客户端无法连接时可调低，如 1.8.0；Xray 提示修改该值会增加被封锁的概率。"
+            extra="与「兼容第三方客户端」联动，可填写自定义值。留空使用 Xray 默认值（v26.3.27 之后的版本要求客户端不低于 26.3.27）。"
           >
             <a-input v-model:value="form.spec.reality.minClientVer" class="mono" placeholder="Xray 默认" />
           </a-form-item>
