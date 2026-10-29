@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/auth"
 	"github.com/Yuuuuu0/x-hub/internal/master/model"
 	"github.com/Yuuuuu0/x-hub/internal/master/routing"
+	"github.com/Yuuuuu0/x-hub/internal/master/share"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 	"github.com/Yuuuuu0/x-hub/internal/master/sub"
 )
@@ -362,6 +364,10 @@ func (h *Handler) serveSubscription(w http.ResponseWriter, r *http.Request, toke
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	if wantsSharePage(r) {
+		h.serveSharePage(w, r, s, nodes)
+		return
+	}
 	format := sub.DetectFormat(r.UserAgent(), r.URL.Query().Get("format"))
 	var body []byte
 	ctype := "text/yaml; charset=utf-8"
@@ -405,4 +411,90 @@ func (h *Handler) serveSubscription(w http.ResponseWriter, r *http.Request, toke
 	hdr.Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(filename))
 	h.Log.Info("subscription fetched", "sub", s.ID, "format", format, "nodes", len(nodes), "ip", h.clientIP(r))
 	w.Write(body)
+}
+
+// baseClientKeywords 为只识别为通用格式、但不应收到分享页的客户端关键字（小写）。
+var baseClientKeywords = []string{"shadowrocket", "v2ray", "nekobox", "nekoray", "hiddify", "quantumult", "surge", "loon", "karing"}
+
+// wantsSharePage 判断是否返回分享页：显式 ?format=page，或浏览器直接打开订阅链接
+// （Accept 含 text/html、User-Agent 为浏览器且不是已知的代理客户端）。显式指定其他格式时不返回分享页。
+func wantsSharePage(r *http.Request) bool {
+	if f := r.URL.Query().Get("format"); f != "" {
+		return f == "page"
+	}
+	ua := strings.ToLower(r.UserAgent())
+	if !strings.Contains(r.Header.Get("Accept"), "text/html") || !strings.Contains(ua, "mozilla/") {
+		return false
+	}
+	if sub.DetectFormat(ua, "") != sub.FormatBase64 {
+		return false
+	}
+	for _, k := range baseClientKeywords {
+		if strings.Contains(ua, k) {
+			return false
+		}
+	}
+	return true
+}
+
+// serveSharePage 输出订阅分享页：用量、到期、各客户端一键导入与节点列表。
+func (h *Handler) serveSharePage(w http.ResponseWriter, r *http.Request, s *store.Subscription, nodes []outNode) {
+	link := h.subscriptionURL(s.Token)
+	if link == "" {
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		link = scheme + "://" + r.Host + r.URL.Path
+	}
+	p := &share.Page{
+		Name: s.Name, Status: "正常使用", StatusTone: "ok", SubURL: link, QR: share.QRCode(link),
+		Clients: share.Clients(link, s.Name, share.DetectDevice(r.UserAgent())), UpdateHours: h.Settings.Subscription().UpdateHours,
+		Used: share.HumanBytes(s.UsedUp + s.UsedDown), Expire: "永不", UsageTone: "",
+	}
+	switch s.State {
+	case store.SubExceeded:
+		p.Status, p.StatusTone = "流量已用完，暂停使用", "bad"
+	case store.SubExpired:
+		p.Status, p.StatusTone = "已到期，暂停使用", "bad"
+	}
+	if s.LimitBytes > 0 {
+		p.Limit = share.HumanBytes(s.LimitBytes)
+		p.Percent = min(100, float64(s.UsedUp+s.UsedDown)*100/float64(s.LimitBytes))
+		switch {
+		case p.Percent >= 100:
+			p.UsageTone = "bad"
+		case p.Percent >= 80:
+			p.UsageTone = "warn"
+		}
+	}
+	if s.ResetDay > 0 {
+		p.Reset = fmt.Sprintf("每月 %d 日重置", s.ResetDay)
+	}
+	if s.ExpireAt > 0 {
+		at := time.Unix(s.ExpireAt, 0).In(h.Settings.Location())
+		days := int(time.Until(at).Hours()/24 + 0.999)
+		p.Expire = at.Format("2006-01-02")
+		switch {
+		case days <= 0:
+			p.Expire, p.ExpireTone = p.Expire+"（已到期）", "bad"
+		case days <= 7:
+			p.Expire, p.ExpireTone = fmt.Sprintf("%s（剩 %d 天）", p.Expire, days), "warn"
+		default:
+			p.Expire = fmt.Sprintf("%s（剩 %d 天）", p.Expire, days)
+		}
+	}
+	for _, n := range nodes {
+		p.Nodes = append(p.Nodes, share.NodeItem{Name: n.Name, ClashOnly: n.Dialer != "" || n.Link == ""})
+	}
+	hdr := w.Header()
+	hdr.Set("Content-Type", "text/html; charset=utf-8")
+	hdr.Set("Cache-Control", "no-store")
+	hdr.Set("X-Robots-Tag", "noindex, nofollow")
+	hdr.Set("Referrer-Policy", "no-referrer")
+	hdr.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	if err := share.Render(w, p); err != nil {
+		h.Log.Warn("render share page", "sub", s.ID, "err", err)
+	}
+	h.Log.Info("share page viewed", "sub", s.ID, "ip", h.clientIP(r))
 }

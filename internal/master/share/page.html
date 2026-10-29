@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>{{.Name}} · 订阅</title>
+<style>
+:root {
+  --bg: #f4f3ee; --grid: rgba(11, 13, 18, 0.045); --surface: #fff; --surface-2: #f8f7f3;
+  --border: #e3e1d9; --text: #0b0d12; --text-2: #4a4d57; --text-3: #8a8c94;
+  --lime: #c6ff3d; --lime-ink: #3f5c00; --ink: #0b0d12;
+  --ok: #17a34a; --warn: #d97706; --bad: #e5484d; --track: #ecebe5;
+  --shadow: 0 1px 0 rgba(11, 13, 18, 0.04), 0 8px 24px -12px rgba(11, 13, 18, 0.12);
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #090a0d; --grid: rgba(255, 255, 255, 0.035); --surface: #111318; --surface-2: #161920;
+    --border: #22262f; --text: #eef0f3; --text-2: #a9adb8; --text-3: #6b707c; --lime-ink: #c6ff3d;
+    --ok: #4ade80; --warn: #fbbf24; --bad: #ff6b6b; --track: #1d2028;
+    --shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; min-height: 100vh; color: var(--text); background-color: var(--bg);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 48px 48px;
+  font: 15px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; padding: 40px 16px 56px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: -0.03em; font-size: 15px; }
+.mark { width: 24px; height: 24px; border-radius: 7px; background: var(--ink); display: grid; place-items: center; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.mark svg { width: 15px; height: 15px; fill: none; stroke: var(--lime); stroke-width: 3.2; stroke-linecap: round; }
+.dash { color: var(--lime-ink); }
+.eyebrow { margin: 32px 0 6px; font: 12px var(--mono); letter-spacing: 0.18em; color: var(--text-3); text-transform: uppercase; }
+h1 { margin: 0; font-size: clamp(40px, 9vw, 72px); line-height: 1; letter-spacing: -0.05em; font-weight: 800; overflow-wrap: anywhere; }
+.status { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; padding: 3px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 13px; }
+.status i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.status.warn i { background: var(--warn); } .status.bad i { background: var(--bad); }
+.status.bad { color: var(--bad); }
+
+.top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; margin-top: 28px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 20px; }
+.usage { display: flex; flex-direction: column; justify-content: center; }
+.usage .big { font: 600 34px/1 var(--mono); letter-spacing: -0.02em; }
+.usage .big small { font-size: 14px; color: var(--text-3); margin-left: 6px; font-weight: 500; }
+.bar { height: 6px; margin: 14px 0 12px; border-radius: 999px; background: var(--track); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
+.bar i.warn { background: var(--warn); } .bar i.bad { background: var(--bad); }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13px; color: var(--text-2); }
+.facts b { font-weight: 500; color: var(--text); }
+.facts .warn { color: var(--warn); } .facts .bad { color: var(--bad); }
+.qr { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 196px; }
+.qr svg { width: 156px; height: 156px; border-radius: 8px; }
+.qr p { margin: 0; font-size: 12px; color: var(--text-3); text-align: center; }
+
+h2 { margin: 40px 0 6px; font-size: 22px; letter-spacing: -0.02em; }
+.lead { margin: 0 0 16px; font-size: 13.5px; color: var(--text-2); }
+.clients { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.client { display: flex; flex-direction: column; gap: 10px; }
+.client.rec { border-color: var(--text); }
+.c-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.c-name { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.c-plat { margin: 2px 0 0; font: 12px var(--mono); color: var(--text-3); }
+.rec-tag { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--ink); color: var(--lime); font-size: 11px; }
+.steps { margin: 0; font-size: 13px; color: var(--text-2); }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 14px;
+  border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; font-size: 13.5px; text-decoration: none; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.btn:hover { border-color: var(--text-3); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+@media (prefers-color-scheme: dark) { .btn.primary { background: var(--lime); border-color: var(--lime); color: var(--ink); } .rec-tag { background: var(--lime); color: var(--ink); } .client.rec { border-color: var(--lime); } }
+.btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn.done { border-color: var(--ok); color: var(--ok); }
+.extra { padding-top: 10px; border-top: 1px dashed var(--border); }
+.extra p { margin: 0 0 8px; font-size: 12.5px; color: var(--text-2); }
+.extra strong { color: var(--text); }
+
+.link { display: flex; gap: 8px; align-items: stretch; }
+.link code { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); font: 12.5px var(--mono); overflow-wrap: anywhere; }
+.nodes { display: flex; flex-wrap: wrap; gap: 6px; }
+.node { padding: 4px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; }
+.node em { margin-left: 6px; font-style: normal; font-size: 11px; color: var(--warn); }
+footer { margin-top: 40px; font-size: 12.5px; color: var(--text-3); }
+@media (max-width: 640px) {
+  main { padding-top: 24px; }
+  .top { grid-template-columns: 1fr; }
+  .qr { display: none; }
+}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><span class="mark"><svg viewBox="0 0 32 32"><path d="M9 9l14 14M23 9L9 23"/></svg></span><span>x<span class="dash">—</span>hub</span></div>
+
+  <p class="eyebrow">Subscription</p>
+  <h1>{{.Name}}</h1>
+  <span class="status {{.StatusTone}}"><i></i>{{.Status}}</span>
+
+  <section class="top">
+    <div class="card usage">
+      <div class="big">{{.Used}}{{if .Limit}}<small>/ {{.Limit}}</small>{{else}}<small>不限量</small>{{end}}</div>
+      {{if .Limit}}<div class="bar"><i class="{{.UsageTone}}" style="width: {{printf "%.1f" .Percent}}%"></i></div>{{else}}<div style="height: 14px"></div>{{end}}
+      <div class="facts">
+        <span>到期 <b class="{{.ExpireTone}}">{{.Expire}}</b></span>
+        {{if .Reset}}<span>流量 <b>{{.Reset}}</b></span>{{end}}
+        <span>客户端每 <b>{{.UpdateHours}}</b> 小时自动更新</span>
+      </div>
+    </div>
+    <div class="card qr">
+      {{.QR}}
+      <p>用手机客户端扫码导入</p>
+    </div>
+  </section>
+
+  <h2>导入到客户端</h2>
+  <p class="lead">点击「一键导入」会打开已安装的客户端；未安装或没有反应时，复制链接到客户端中手动添加。</p>
+  <div class="clients">
+    {{range .Clients}}
+    <article class="card client{{if .Recommended}} rec{{end}}">
+      <div class="c-head">
+        <div><p class="c-name">{{.Name}}</p><p class="c-plat">{{.Platforms}}</p></div>
+        {{if .Recommended}}<span class="rec-tag">推荐</span>{{end}}
+      </div>
+      <p class="steps">{{.Steps}}</p>
+      <div class="acts">
+        {{if .Import}}<a class="btn primary" href="{{.Import}}"><svg viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>一键导入</a>{{end}}
+        <button class="btn{{if not .Import}} primary{{end}}" type="button" data-copy="{{.Link}}"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制链接</span></button>
+      </div>
+      {{with .Extra}}
+      <div class="extra">
+        <p><strong>{{.Label}}</strong>　{{.Steps}}</p>
+        <button class="btn" type="button" data-copy="{{.Link}}"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制{{.Label}}链接</span></button>
+      </div>
+      {{end}}
+    </article>
+    {{end}}
+  </div>
+
+  <h2>订阅链接</h2>
+  <p class="lead">适用于其他客户端，会按客户端自动返回对应格式。</p>
+  <div class="link">
+    <code>{{.SubURL}}</code>
+    <button class="btn" type="button" data-copy="{{.SubURL}}"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制</span></button>
+  </div>
+
+  {{if .Nodes}}
+  <h2>节点 · {{len .Nodes}}</h2>
+  <p class="lead">导入后在客户端中更新订阅即可获取最新节点。</p>
+  <div class="nodes">
+    {{range .Nodes}}<span class="node">{{.Name}}{{if .ClashOnly}}<em>仅 Clash / sing-box</em>{{end}}</span>{{end}}
+  </div>
+  {{end}}
+
+  <footer>此链接即凭据，请勿转发给他人。</footer>
+</main>
+<script>
+// 复制按钮：优先使用剪贴板 API，非安全上下文（如 http）时退回 execCommand。
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-copy]')
+  if (!btn) return
+  const text = btn.dataset.copy
+  let ok = false
+  try {
+    await navigator.clipboard.writeText(text)
+    ok = true
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try { ok = document.execCommand('copy') } catch {}
+    ta.remove()
+  }
+  const label = btn.querySelector('span')
+  const old = label.textContent
+  label.textContent = ok ? '已复制' : '复制失败，请手动复制'
+  btn.classList.toggle('done', ok)
+  setTimeout(() => { label.textContent = old; btn.classList.remove('done') }, 1800)
+})
+</script>
+</body>
+</html>

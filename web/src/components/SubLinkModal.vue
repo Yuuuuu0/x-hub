@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { Check, Copy } from 'lucide-vue-next'
+import { Check, Copy, ExternalLink } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import type { Subscription } from '../lib/api'
 import { copyText } from '../lib/clipboard'
@@ -59,6 +59,12 @@ async function copy() {
         <component :is="copied ? Check : Copy" :size="15" />
         {{ copied ? '已复制' : '复制订阅链接' }}
       </a-button>
+      <div class="share">
+        <p class="muted">把「自动识别」链接直接发给使用者，用浏览器打开即可看到用量与各客户端的一键导入说明。</p>
+        <a-button :href="`${sub.url}?format=page`" target="_blank" rel="noopener" class="share-btn">
+          <ExternalLink :size="14" />预览分享页
+        </a-button>
+      </div>
       <p class="muted foot">链接即凭据，请勿公开分享。泄露后可在订阅卡片中「重置链接」。</p>
     </div>
   </a-modal>
@@ -75,6 +81,25 @@ async function copy() {
   align-self: flex-start;
   max-width: 100%;
   overflow-x: auto;
+}
+.share {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px dashed var(--border-strong);
+}
+.share p {
+  margin: 0;
+  flex: 1;
+  font-size: 12.5px;
+}
+.share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
 }
 .hint,
 .foot {

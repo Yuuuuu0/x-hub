@@ -169,3 +169,41 @@ func TestSubscriptionExcludeScope(t *testing.T) {
 		t.Fatal("scope reset failed")
 	}
 }
+
+// TestSharePage 覆盖分享页的识别：浏览器打开返回页面，客户端与显式格式仍返回配置。
+func TestSharePage(t *testing.T) {
+	h := newTestHandler(t)
+	n1, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	addInbound(t, h, n1, 443, "")
+	subID, _ := CreateSubscription(h.Store, "朋友A", "")
+	s, _ := h.Store.GetSubscription(subID)
+	browser := "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1"
+	fetch := func(ua, accept, query string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/"+h.Settings.Subscription().Path+"/"+s.Token+query, nil)
+		req.Header.Set("User-Agent", ua)
+		req.Header.Set("Accept", accept)
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	html := "text/html,application/xhtml+xml,*/*;q=0.8"
+	rec := fetch(browser, html, "")
+	body := rec.Body.String()
+	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") || !strings.Contains(body, "朋友A") ||
+		!strings.Contains(body, "shadowrocket://add/sub://") || !strings.Contains(body, "<svg") || !strings.Contains(body, "推荐") {
+		t.Fatalf("share page: %s %.300s", rec.Header().Get("Content-Type"), body)
+	}
+	for _, c := range []struct{ ua, accept, query string }{
+		{browser, html, "?format=base64"},
+		{"Shadowrocket/2070 CFNetwork/1568 Darwin/24.0.0", "*/*", ""},
+		{"Mozilla/5.0 clash-verge/v2.0", html, ""},
+		{browser, "*/*", ""},
+	} {
+		if rec := fetch(c.ua, c.accept, c.query); strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
+			t.Errorf("client %q got the share page", c.ua)
+		}
+	}
+	if rec := fetch("v2rayN/7.0", "*/*", "?format=page"); !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
+		t.Error("?format=page must return the share page")
+	}
+}
