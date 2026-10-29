@@ -52,23 +52,20 @@ docker logs xhub        # 查看面板地址与初始密码
       - "127.0.0.1:2096:2096"
 ```
 
-**2. 先通过 SSH 隧道进入面板完成切换**
+**2. 把主控切换为反向代理模式**
 
-此时外部已无法直连 2096，在本地电脑执行：
+主控首次启动默认以自签证书提供 HTTPS，而 Nginx 以 HTTP 转发，需先切换（否则会看到“主控当前以 HTTPS 提供服务，但收到了明文 HTTP 请求”）：
 
 ```bash
-ssh -L 2096:127.0.0.1:2096 root@<服务器IP>
+docker exec xhub xhub-master settings proxy --public-url https://hub.example.com
+docker restart xhub
 ```
 
-然后浏览器访问 `https://127.0.0.1:2096/<面板路径>/`（自签证书，需手动信任），在「设置 → 访问」中：
+- `--public-url` 为 Nginx 对外的地址（非 443 端口需带上端口），被控端安装命令与订阅链接都会使用它。
+- 可信代理默认为 `127.0.0.1`、`::1`，在容器中另加 Docker 默认网段 `172.16.0.0/12`（经端口映射访问时主控看到的来源地址）；自定义过网段时用 `--trusted 127.0.0.1,172.20.0.0/16` 指定，网段可用 `docker network inspect` 查看。
+- 二进制部署：`xhub-master settings proxy --public-url https://hub.example.com --data <数据目录>`，然后重启主控。
 
-| 设置项 | 值 |
-|---|---|
-| TLS 模式 | 反向代理 |
-| 公开访问地址 | `https://hub.example.com`（Nginx 对外的地址，非 443 端口需带上端口） |
-| 可信代理 | Docker 部署填 `172.16.0.0/12`（经端口映射访问时，主控看到的来源是 Docker 网桥地址；自定义过网段时用 `docker network inspect` 查看）；二进制部署填 `127.0.0.1` |
-
-保存后主控改为提供 HTTP，再配置 Nginx。
+> 被控端的安装命令请在切换之后再生成。自签证书模式下生成的命令会锁定主控自签证书的公钥，经 Nginx 访问时校验必然失败（`curl: (90) SSL: public key does not match pinned public key`）。
 
 **3. Nginx 配置**
 
@@ -148,6 +145,7 @@ server {
 ```bash
 docker exec -it xhub xhub-master settings show          # 查看访问配置
 docker exec -it xhub xhub-master settings reset-access  # 恢复 :2096 + 自签证书 + 新面板路径（需重启容器）
+docker exec -it xhub xhub-master settings proxy --public-url https://hub.example.com  # 切换为反向代理模式（需重启容器）
 docker exec -it xhub xhub-master admin reset            # 重置管理员密码并关闭两步验证
 ```
 

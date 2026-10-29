@@ -265,6 +265,8 @@ var minVersion = map[Feature]Version{ /* M1 对照官方 changelog 填写 */ }
 - 修改监听地址、端口、TLS 模式、面板路径时（容器部署时监听地址固定，见 11.1）：先校验（端口可绑定、证书可加载），再在进程内平滑重启 HTTP 服务，前端跳转到新地址；校验失败拒绝保存。
 - `trusted_proxies`：Cloudflare / 反代场景下从 `CF-Connecting-IP` / `X-Forwarded-For` 取真实 IP。
 - Cloudflare 橙云仅代理 443 / 2053 / 2083 / 2087 / 2096 / 8443 等端口，默认端口取 2096。
+- TLS 模式下监听器先窥探首字节：TLS 握手照常处理，明文 HTTP 请求返回中文说明与切换命令，避免反向代理首次部署时只看到 Go 默认的 `Client sent an HTTP request to an HTTPS server`。
+- 自签模式下生成安装命令前，主控会连接公开访问地址核对返回的证书公钥；若不是自签证书（前面有 Nginx / Cloudflare），拒绝生成并提示切换为反向代理模式。
 
 ### 10.4 设置项一览
 
@@ -284,6 +286,7 @@ var minVersion = map[Feature]Version{ /* M1 对照官方 changelog 填写 */ }
 |---|---|
 | `xhub-master settings show` | 打印当前访问配置 |
 | `xhub-master settings reset-access` | 恢复 `:2096` + `selfsigned` + 新随机面板路径 |
+| `xhub-master settings proxy --public-url URL [--trusted CIDR,...]` | 切换为反向代理模式；可信代理默认本机，容器中另加 `172.16.0.0/12` |
 | `xhub-master admin reset` | 重置管理员密码并关闭 TOTP |
 
 ## 11. 部署
