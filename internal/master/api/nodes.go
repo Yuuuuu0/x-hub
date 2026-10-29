@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +19,7 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/hub"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
+	"github.com/Yuuuuu0/x-hub/internal/shared/tlspin"
 	"github.com/Yuuuuu0/x-hub/internal/shared/xraycap"
 	"github.com/Yuuuuu0/x-hub/internal/version"
 )
@@ -158,6 +162,10 @@ func (h *Handler) installCommand(w http.ResponseWriter, r *http.Request) {
 	ep := h.Endpoint()
 	if ep.URL == "" {
 		writeError(w, http.StatusBadRequest, "请先在「设置 → 访问」中填写公开访问地址")
+		return
+	}
+	if err := verifySelfSignedPin(r.Context(), ep); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	token := auth.RandomToken()
@@ -375,4 +383,35 @@ func (h *Handler) batchInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 	writeJSON(w, http.StatusOK, map[string]any{"results": out})
+}
+
+// verifySelfSignedPin 在自签模式下确认公开访问地址返回的确实是主控的自签证书。
+// 主控位于 Nginx / Cloudflare 之后时，公开地址返回的是代理的证书，锁定自签公钥的安装命令必然失败。
+// 连接不上（如服务器无法回环访问自己的公网地址）时不阻塞，按原样生成。
+func verifySelfSignedPin(ctx context.Context, ep protocol.Endpoint) error {
+	if ep.FP == "" {
+		return nil
+	}
+	u, err := url.Parse(ep.URL)
+	if err != nil || u.Scheme != "https" {
+		return nil
+	}
+	addr := u.Host
+	if u.Port() == "" {
+		addr = net.JoinHostPort(u.Hostname(), "443")
+	}
+	d := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}, Config: &tls.Config{ServerName: u.Hostname(), InsecureSkipVerify: true}}
+	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	c, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil
+	}
+	defer c.Close()
+	certs := c.(*tls.Conn).ConnectionState().PeerCertificates
+	if len(certs) > 0 && tlspin.Fingerprint(certs[0]) != ep.FP {
+		return fmt.Errorf("公开访问地址 %s 返回的不是主控的自签证书（前面可能有 Nginx / Cloudflare）。"+
+			"请先把主控切换为反向代理模式（设置 → 访问，或执行 xhub-master settings proxy），再生成安装命令", ep.URL)
+	}
+	return nil
 }

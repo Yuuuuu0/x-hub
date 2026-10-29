@@ -71,6 +71,7 @@ async function copy() {
       <ul class="notes">
         <li>令牌仅能使用一次，<span class="mono">{{ datetime(expireAt) }}</span> 前有效。</li>
         <li>需要 systemd，支持 amd64 / arm64。重复执行即为重装，旧凭据随之失效。</li>
+        <li v-if="command.includes('--fp')">命令锁定了主控自签证书的公钥。主控位于 Nginx / Cloudflare 之后时，请先在「设置 → 访问」切换为反向代理模式，再重新生成。</li>
         <li>卸载：<code class="mono">{{ uninstall }}</code></li>
       </ul>
       <a-button type="link" class="regen" @click="generate">

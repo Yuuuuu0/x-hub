@@ -190,6 +190,40 @@ func SettingsShow(dataDir string) error {
 	return nil
 }
 
+// SettingsProxy 把访问配置切换为反向代理模式：主控改为提供 HTTP，由前置 Nginx / Caddy 终结 TLS。
+// trusted 为空时信任本机，运行在容器中时另信任 Docker 默认网段（经端口映射访问时的来源地址）。
+func SettingsProxy(dataDir, publicURL string, trusted []string) error {
+	if publicURL == "" {
+		return fmt.Errorf("需要 --public-url，例如 --public-url https://hub.example.com")
+	}
+	st, err := openStore(dataDir)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	cfg, _, err := settings.Load(st, newPanelPath)
+	if err != nil {
+		return err
+	}
+	if len(trusted) == 0 {
+		trusted = []string{"127.0.0.1", "::1"}
+		if inContainer() {
+			trusted = append(trusted, "172.16.0.0/12")
+		}
+	}
+	a := cfg.Access()
+	a.TLSMode, a.PublicURL, a.TrustedProxies = settings.TLSProxy, publicURL, trusted
+	a.CertFile, a.KeyFile = "", ""
+	if err := cfg.SaveAccess(a); err != nil {
+		return err
+	}
+	a = cfg.Access()
+	fmt.Printf("已切换为反向代理模式，重启主控后生效（Docker：docker restart xhub）。\n  面板地址：%s/%s/\n  可信代理：%s\n",
+		a.PublicURL, a.PanelPath, strings.Join(a.TrustedProxies, ", "))
+	fmt.Println("  反向代理需转发到主控的 HTTP 端口，并支持 WebSocket（被控端接入使用 /agent/ws）。")
+	return nil
+}
+
 // SettingsResetAccess 把访问配置恢复为 :2096 + 自签证书 + 新随机面板路径，保留公开地址。
 func SettingsResetAccess(dataDir string) error {
 	st, err := openStore(dataDir)

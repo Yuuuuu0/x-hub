@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	_ "time/tzdata" // distroless 镜像不含时区数据，统计时区依赖它
 
 	"github.com/Yuuuuu0/x-hub/internal/master/app"
@@ -16,6 +17,8 @@ const usage = `用法：
   xhub-master [run]               启动主控
   xhub-master settings show       打印当前访问配置
   xhub-master settings reset-access  恢复默认访问配置（:2096 + 自签证书 + 新面板路径）
+  xhub-master settings proxy --public-url URL [--trusted CIDR,...]
+                                  切换为反向代理模式（前置 Nginx / Caddy 终结 TLS）
   xhub-master admin reset         重置管理员密码并关闭两步验证
   xhub-master restore <备份文件>  用备份恢复数据库（需先停止主控）
   xhub-master version             打印版本
@@ -36,6 +39,8 @@ func main() {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	dataDir := fs.String("data", "./data", "")
 	agentDir := fs.String("agents", defaultAgentDir(), "")
+	publicURL := fs.String("public-url", "", "")
+	trusted := fs.String("trusted", "", "")
 	fs.Parse(args)
 
 	var err error
@@ -51,6 +56,14 @@ func main() {
 		err = app.Run(app.Options{DataDir: *dataDir, AgentDir: *agentDir})
 	case "[settings show]":
 		err = app.SettingsShow(*dataDir)
+	case "[settings proxy]":
+		var list []string
+		for _, t := range strings.Split(*trusted, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				list = append(list, t)
+			}
+		}
+		err = app.SettingsProxy(*dataDir, *publicURL, list)
 	case "[settings reset-access]":
 		err = app.SettingsResetAccess(*dataDir)
 	case "[admin reset]":

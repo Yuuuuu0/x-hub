@@ -99,30 +99,11 @@ func (s *Server) serve(addr string, ln net.Listener) {
 	s.mu.Lock()
 	s.addr, s.srv = addr, srv
 	s.mu.Unlock()
-	dl := &dynamicListener{Listener: ln, tlsCfg: s.tlsCfg, settings: s.settings}
+	dl := newDynamicListener(ln, s.tlsCfg, s.settings)
 	s.log.Info("listening", "addr", addr)
 	go func() {
 		if err := srv.Serve(dl); err != nil && err != http.ErrServerClosed {
 			s.log.Error("serve", "addr", addr, "err", err)
 		}
 	}()
-}
-
-// dynamicListener 在 Accept 时根据当前 TLS 模式决定是否包装为 TLS 连接。
-// net/http 识别 *tls.Conn 并负责握手，从而 r.TLS 正常可用。
-type dynamicListener struct {
-	net.Listener
-	tlsCfg   *tls.Config
-	settings *settings.Service
-}
-
-func (l *dynamicListener) Accept() (net.Conn, error) {
-	c, err := l.Listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	if l.settings.Access().TLSMode == settings.TLSProxy {
-		return c, nil
-	}
-	return tls.Server(c, l.tlsCfg), nil
 }
