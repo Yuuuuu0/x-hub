@@ -42,7 +42,11 @@ func (m *Manager) Apply(rev int64, hash string, cfg []byte) error {
 			return fmt.Errorf("配置校验失败：%s", lastLine(string(out)))
 		}
 	}
+	prev, _ := os.ReadFile(m.masterConfigPath())
 	if err := os.Rename(tmp, m.configPath()); err != nil {
+		return err
+	}
+	if err := os.WriteFile(m.masterConfigPath(), cfg, 0o600); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -57,9 +61,26 @@ func (m *Manager) Apply(rev int64, hash string, cfg []byte) error {
 	if !enabled || !m.Status().Installed {
 		return nil
 	}
+	// 只有用户变化时在线增删，不中断其他连接；失败则回退为重启。
+	if m.running() && prev != nil {
+		if ops, ok := usersOnlyDiff(prev, cfg); ok {
+			if len(ops) == 0 {
+				return nil
+			}
+			if err := m.alterUsers(ops); err == nil {
+				m.log.Info("xray users updated via api", "ops", len(ops))
+				return nil
+			} else {
+				m.log.Warn("alter users failed, restarting xray", "err", err)
+			}
+		}
+	}
 	m.stopProc()
 	return m.startProc()
 }
+
+// masterConfigPath 为最近一次应用的主控原始配置，用于判断下次变更是否只涉及用户。
+func (m *Manager) masterConfigPath() string { return filepath.Join(m.dir, "master-config.json") }
 
 // withManagement 向主控配置注入被控端自管的 api / stats / policy 段。
 func (m *Manager) withManagement(cfg []byte) ([]byte, error) {
