@@ -1,0 +1,98 @@
+/* 设计令牌：墨色基底 + 酸性青柠强调色，等宽数字承载数据。 */
+:root {
+  --font-display: 'Space Grotesk Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-body: 'Space Grotesk Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --lime: #c6ff3d;
+  --lime-ink: #3f5c00;
+  --ink: #0b0d12;
+
+  --bg: #f4f3ee;
+  --bg-grid: rgba(11, 13, 18, 0.045);
+  --surface: #ffffff;
+  --surface-2: #f8f7f3;
+  --border: #e3e1d9;
+  --border-strong: #cfccc1;
+  --text: #0b0d12;
+  --text-2: #4a4d57;
+  --text-3: #8a8c94;
+  --ok: #17a34a;
+  --warn: #d97706;
+  --bad: #e5484d;
+  --idle: #a1a3ab;
+  --bar-track: #ecebe5;
+  --shadow: 0 1px 0 rgba(11, 13, 18, 0.04), 0 8px 24px -12px rgba(11, 13, 18, 0.12);
+  --radius: 14px;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #090a0d;
+  --bg-grid: rgba(255, 255, 255, 0.035);
+  --surface: #111318;
+  --surface-2: #161920;
+  --border: #22262f;
+  --border-strong: #2f3440;
+  --text: #eef0f3;
+  --text-2: #a9adb8;
+  --text-3: #6b707c;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #ff6b6b;
+  --idle: #4b505c;
+  --bar-track: #1d2028;
+  --lime-ink: #c6ff3d;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-image:
+    linear-gradient(var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-attachment: fixed;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'zero' 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--text-3);
+}
+
+::selection {
+  background: var(--lime);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
