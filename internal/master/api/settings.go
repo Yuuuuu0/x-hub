@@ -1,8 +1,11 @@
 package api
 
 import (
+	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Yuuuuu0/x-hub/internal/master/settings"
@@ -16,6 +19,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"security":     h.Settings.Security(),
 		"subscription": h.Settings.Subscription(),
 		"stats":        h.Settings.Stats(),
+		"certs":        certsView(h.Settings.Certs()),
 	}
 	if fp, err := h.Certs.SelfSigned(); err == nil {
 		out["selfSignedFingerprint"] = fp
@@ -123,4 +127,44 @@ func (h *Handler) putStatsSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.Settings.Stats())
+}
+
+// certsView 不回传 Cloudflare Token，只告知是否已设置。
+func certsView(c settings.Certs) map[string]any {
+	return map[string]any{"acmeEmail": c.ACMEEmail, "cloudflareTokenSet": c.CloudflareToken != ""}
+}
+
+func (h *Handler) putCertsSettings(w http.ResponseWriter, r *http.Request) {
+	var c settings.Certs
+	if err := readJSON(r, &c); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.Settings.SaveCerts(c); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.Syncer.TriggerAll() // 之前因缺少凭据而申请失败的节点重新尝试
+	writeJSON(w, http.StatusOK, certsView(h.Settings.Certs()))
+}
+
+// backup 下发数据库一致性快照，包含全部配置、订阅与流量统计。
+func (h *Handler) backup(w http.ResponseWriter, r *http.Request) {
+	tmp := filepath.Join(h.DataDir, fmt.Sprintf("backup-%d.db", time.Now().UnixNano()))
+	defer os.Remove(tmp)
+	if err := h.Store.Backup(tmp); err != nil {
+		writeError(w, http.StatusInternalServerError, "备份失败："+err.Error())
+		return
+	}
+	f, err := os.Open(tmp)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer f.Close()
+	name := "xhub-backup-" + time.Now().In(h.Settings.Location()).Format("20060102-1504") + ".db"
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, name, time.Now(), f)
 }

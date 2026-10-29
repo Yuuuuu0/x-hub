@@ -22,6 +22,7 @@ const (
 const (
 	ProbeRealityTarget = "reality_target" // 检测 Reality 目标网站是否支持 TLS 1.3 / H2
 	ProbePort          = "port"           // 检测端口是否可用
+	ProbeCertFiles     = "cert_files"     // 检测证书文件能否被被控端读取
 )
 
 // Xray 控制动作。
@@ -85,11 +86,19 @@ type Hello struct {
 }
 
 // Apply 为主控下发的完整 Xray 配置（不含被控端自管的 api / stats / policy 段）。
-// 被控端忽略 Rev 小于已应用版本的配置。
+// 被控端忽略 Rev 小于已应用版本的配置。ACME 非空时，被控端需先确保这些域名的证书可用。
 type Apply struct {
 	Rev    int64           `json:"rev"`
 	Hash   string          `json:"hash"`
 	Config json.RawMessage `json:"config"`
+	ACME   *ACME           `json:"acme,omitempty"`
+}
+
+// ACME 为被控端自动申请证书所需的信息，使用 Cloudflare DNS 验证。
+type ACME struct {
+	Email           string   `json:"email"`
+	CloudflareToken string   `json:"cloudflareToken"`
+	Domains         []string `json:"domains"`
 }
 
 // ApplyResult 为配置应用结果。
@@ -104,6 +113,16 @@ type ProbeRequest struct {
 	Target     string `json:"target,omitempty"`     // reality_target：域名:端口
 	ServerName string `json:"serverName,omitempty"` // reality_target：握手使用的 SNI
 	Port       int    `json:"port,omitempty"`       // port
+	CertFile   string `json:"certFile,omitempty"`   // cert_files
+	KeyFile    string `json:"keyFile,omitempty"`    // cert_files
+}
+
+// ProbeCertResult 为证书文件探测结果。
+type ProbeCertResult struct {
+	OK       bool     `json:"ok"`
+	Error    string   `json:"error,omitempty"`
+	Names    []string `json:"names,omitempty"`
+	NotAfter int64    `json:"notAfter,omitempty"`
 }
 
 // ProbeTargetResult 为 Reality 目标网站探测结果。

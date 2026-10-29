@@ -27,6 +27,7 @@ const (
 	keySecurity     = "security"
 	keySubscription = "subscription"
 	keyStats        = "stats"
+	keyCerts        = "certs"
 )
 
 // DefaultListen 为默认监听地址。2096 位于 Cloudflare 支持代理的 HTTPS 端口列表中。
@@ -67,6 +68,12 @@ type Stats struct {
 	RetentionDays int    `json:"retentionDays"` // 小时明细保留天数，之后汇总为天
 }
 
+// Certs 为被控端自动申请证书（ACME + Cloudflare DNS）所需的凭据。
+type Certs struct {
+	ACMEEmail       string `json:"acmeEmail"`
+	CloudflareToken string `json:"cloudflareToken"`
+}
+
 // DefaultNameTemplate 为默认节点名称模板。
 const DefaultNameTemplate = "{node} {remark}"
 
@@ -82,6 +89,7 @@ type Service struct {
 	sub      Subscription
 	stats    Stats
 	loc      *time.Location
+	certs    Certs
 }
 
 // Load 从数据库加载全部设置，缺失项写入默认值。firstRun 表示访问设置此前不存在。
@@ -123,7 +131,35 @@ func Load(st *store.Store, newPanelPath func() string) (svc *Service, firstRun b
 	if svc.loc, err = time.LoadLocation(svc.stats.Timezone); err != nil {
 		svc.loc = time.UTC
 	}
+	if _, err := st.GetSetting(keyCerts, &svc.certs); err != nil {
+		return nil, false, err
+	}
 	return svc, firstRun, nil
+}
+
+// Certs 返回证书凭据。
+func (s *Service) Certs() Certs {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.certs
+}
+
+// SaveCerts 保存证书凭据；Token 为空表示保持原值。
+func (s *Service) SaveCerts(c Certs) error {
+	c.ACMEEmail, c.CloudflareToken = strings.TrimSpace(c.ACMEEmail), strings.TrimSpace(c.CloudflareToken)
+	if c.ACMEEmail != "" && !strings.Contains(c.ACMEEmail, "@") {
+		return fmt.Errorf("邮箱格式错误")
+	}
+	if c.CloudflareToken == "" {
+		c.CloudflareToken = s.Certs().CloudflareToken
+	}
+	if err := s.store.PutSetting(keyCerts, c); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.certs = c
+	s.mu.Unlock()
+	return nil
 }
 
 // Stats 返回统计设置。

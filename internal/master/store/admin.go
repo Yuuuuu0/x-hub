@@ -11,6 +11,7 @@ type Admin struct {
 	ID           int64
 	Username     string
 	PasswordHash string
+	TOTPSecret   string // 为空表示未启用两步验证
 }
 
 // Session 为管理员登录会话。
@@ -30,22 +31,22 @@ func (s *Store) CountAdmins() (int, error) {
 
 // FirstAdmin 返回唯一的管理员（v1 只支持单管理员）。
 func (s *Store) FirstAdmin() (*Admin, error) {
-	return s.scanAdmin(s.db.QueryRow("SELECT id, username, password_hash FROM admins ORDER BY id LIMIT 1"))
+	return s.scanAdmin(s.db.QueryRow("SELECT id, username, password_hash, totp_secret FROM admins ORDER BY id LIMIT 1"))
 }
 
 // AdminByUsername 按用户名查找管理员。
 func (s *Store) AdminByUsername(username string) (*Admin, error) {
-	return s.scanAdmin(s.db.QueryRow("SELECT id, username, password_hash FROM admins WHERE username = ?", username))
+	return s.scanAdmin(s.db.QueryRow("SELECT id, username, password_hash, totp_secret FROM admins WHERE username = ?", username))
 }
 
 // AdminByID 按 ID 查找管理员。
 func (s *Store) AdminByID(id int64) (*Admin, error) {
-	return s.scanAdmin(s.db.QueryRow("SELECT id, username, password_hash FROM admins WHERE id = ?", id))
+	return s.scanAdmin(s.db.QueryRow("SELECT id, username, password_hash, totp_secret FROM admins WHERE id = ?", id))
 }
 
 func (s *Store) scanAdmin(row *sql.Row) (*Admin, error) {
 	var a Admin
-	if err := row.Scan(&a.ID, &a.Username, &a.PasswordHash); err != nil {
+	if err := row.Scan(&a.ID, &a.Username, &a.PasswordHash, &a.TOTPSecret); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -75,6 +76,17 @@ func (s *Store) UpdateAdminCredentials(id int64, username, passwordHash string, 
 		return err
 	}
 	return tx.Commit()
+}
+
+// SetAdminTOTP 设置或清除（secret 为空）管理员的两步验证密钥。
+func (s *Store) SetAdminTOTP(id int64, secret string) error {
+	return s.execOne("UPDATE admins SET totp_secret = ? WHERE id = ?", secret, id)
+}
+
+// Backup 把数据库一致性快照写入 path（VACUUM INTO，运行中也可安全执行）。
+func (s *Store) Backup(path string) error {
+	_, err := s.db.Exec("VACUUM INTO ?", path)
+	return err
 }
 
 // CreateSession 创建登录会话。

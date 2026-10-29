@@ -29,8 +29,9 @@ type Node struct {
 	AppliedHash  string            `json:"appliedHash"`
 	SyncError    string            `json:"syncError"`
 	LastSeq      int64             `json:"-"`
-	NetResetDay  int               `json:"netResetDay"`   // 服务器流量计费周期的重置日（1-28）
-	NetQuota     int64             `json:"netQuotaBytes"` // 服务器每周期流量配额，0 表示不限
+	NetResetDay  int               `json:"netResetDay"`       // 服务器流量计费周期的重置日（1-28）
+	NetQuota     int64             `json:"netQuotaBytes"`     // 服务器每周期流量配额，0 表示不限
+	XrayPinned   string            `json:"xrayPinnedVersion"` // 锁定的 Xray 版本，批量升级时跳过
 
 	secretHash string
 }
@@ -40,7 +41,7 @@ func (n *Node) SecretHash() string { return n.secretHash }
 
 const nodeColumns = `id, name, remark, sort, public_host, secret_hash, agent_version, xray_version,
 	capabilities_json, host_info_json, last_ip, last_seen_at, created_at, desired_rev, applied_rev, applied_hash, sync_error,
-	last_seq, net_reset_day, net_quota_bytes`
+	last_seq, net_reset_day, net_quota_bytes, xray_pinned_version`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -49,7 +50,7 @@ func scanNode(r rowScanner) (*Node, error) {
 	var caps, host string
 	if err := r.Scan(&n.ID, &n.Name, &n.Remark, &n.Sort, &n.PublicHost, &n.secretHash, &n.AgentVersion,
 		&n.XrayVersion, &caps, &host, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.DesiredRev, &n.AppliedRev,
-		&n.AppliedHash, &n.SyncError, &n.LastSeq, &n.NetResetDay, &n.NetQuota); err != nil {
+		&n.AppliedHash, &n.SyncError, &n.LastSeq, &n.NetResetDay, &n.NetQuota, &n.XrayPinned); err != nil {
 		return nil, err
 	}
 	n.Enrolled = n.secretHash != ""
@@ -127,6 +128,11 @@ func (s *Store) UpdateNodeXray(id int64, xrayVersion string, caps []string) erro
 func (s *Store) TouchNode(id int64) error {
 	_, err := s.db.Exec("UPDATE nodes SET last_seen_at = ? WHERE id = ?", time.Now().Unix(), id)
 	return err
+}
+
+// SetNodeXrayPin 锁定或解除锁定（空字符串）服务器的 Xray 版本。
+func (s *Store) SetNodeXrayPin(id int64, version string) error {
+	return s.execOne("UPDATE nodes SET xray_pinned_version = ? WHERE id = ?", version, id)
 }
 
 // NextDesiredRev 递增并返回服务器的期望配置版本号。

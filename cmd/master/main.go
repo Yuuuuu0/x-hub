@@ -16,7 +16,8 @@ const usage = `用法：
   xhub-master [run]               启动主控
   xhub-master settings show       打印当前访问配置
   xhub-master settings reset-access  恢复默认访问配置（:2096 + 自签证书 + 新面板路径）
-  xhub-master admin reset         重置管理员密码
+  xhub-master admin reset         重置管理员密码并关闭两步验证
+  xhub-master restore <备份文件>  用备份恢复数据库（需先停止主控）
   xhub-master version             打印版本
 
 通用参数：
@@ -38,6 +39,13 @@ func main() {
 	fs.Parse(args)
 
 	var err error
+	if len(cmd) == 2 && cmd[0] == "restore" {
+		if err := app.Restore(*dataDir, cmd[1]); err != nil {
+			fmt.Fprintln(os.Stderr, "错误：", err)
+			os.Exit(1)
+		}
+		return
+	}
 	switch fmt.Sprint(cmd) {
 	case "[]", "[run]":
 		err = app.Run(app.Options{DataDir: *dataDir, AgentDir: *agentDir})

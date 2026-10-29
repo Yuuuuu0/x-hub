@@ -81,11 +81,13 @@ func Run(opts Options) error {
 		Releases:      xrayrel.New(filepath.Join(opts.DataDir, "cache", "xray")),
 		Log:           log,
 		Web:           web.Dist(),
+		DataDir:       opts.DataDir,
 		AgentDir:      opts.AgentDir,
 		InstallScript: deploy.InstallScript,
 	}
 	h.Hub = hub.New(st, log, hub.Hooks{Endpoint: h.Endpoint, OnHello: h.OnAgentHello})
 	h.Syncer = syncer.New(st, h.Hub, log)
+	h.Syncer.SetACME(func() (string, string) { c := cfg.Certs(); return c.ACMEEmail, c.CloudflareToken })
 	h.Accounting = accounting.New(st, cfg, h.Syncer, log)
 	h.Hub.SetTrafficHooks(h.Accounting.LastSeq, h.Accounting.Ingest)
 	h.Init()
@@ -213,10 +215,48 @@ func AdminReset(dataDir string) error {
 	if err := st.UpdateAdminCredentials(admin.ID, admin.Username, auth.HashPassword(pw), 0); err != nil {
 		return err
 	}
+	if err := st.SetAdminTOTP(admin.ID, ""); err != nil {
+		return err
+	}
 	if err := st.DeleteAllSessions(); err != nil {
 		return err
 	}
-	fmt.Printf("管理员密码已重置：\n  账号：%s\n  密码：%s\n", admin.Username, pw)
+	fmt.Printf("管理员密码已重置，两步验证已关闭：\n  账号：%s\n  密码：%s\n", admin.Username, pw)
+	return nil
+}
+
+// Restore 用备份文件替换当前数据库，原数据库保留为 .bak 副本。需在主控停止时执行。
+func Restore(dataDir, file string) error {
+	probe, err := store.Open(file)
+	if err != nil {
+		return fmt.Errorf("备份文件无效：%w", err)
+	}
+	_, err = probe.FirstAdmin()
+	probe.Close()
+	if err != nil {
+		return fmt.Errorf("备份文件无效：%w", err)
+	}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	db := filepath.Join(dataDir, "xhub.db")
+	if _, err := os.Stat(db); err == nil {
+		bak := db + ".bak-" + time.Now().Format("20060102-150405")
+		if err := os.Rename(db, bak); err != nil {
+			return err
+		}
+		fmt.Println("原数据库已保留为", bak)
+	}
+	os.Remove(db + "-wal")
+	os.Remove(db + "-shm")
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(db, data, 0o600); err != nil {
+		return err
+	}
+	fmt.Println("恢复完成，启动主控后生效")
 	return nil
 }
 

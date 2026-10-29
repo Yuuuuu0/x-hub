@@ -89,6 +89,34 @@ func (in *inboundInput) toInbound() (*store.Inbound, error) {
 	}, nil
 }
 
+// checkCerts 校验 TLS 入站的证书来源：ACME 需要已配置凭据；证书文件在服务器在线时检查能否读取。
+func (h *Handler) checkCerts(ctx context.Context, in *store.Inbound) error {
+	spec, err := model.ParseSpec(in.Protocol, in.Spec)
+	if err != nil || spec.TLS == nil {
+		return err
+	}
+	if spec.TLS.CertMode == model.CertACME {
+		if c := h.Settings.Certs(); c.ACMEEmail == "" || c.CloudflareToken == "" {
+			return errors.New("自动申请证书需要先在「设置 → 证书」中填写 ACME 邮箱与 Cloudflare API Token")
+		}
+		return nil
+	}
+	if !h.Hub.State(in.NodeID).Online {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var res protocol.ProbeCertResult
+	req := protocol.ProbeRequest{Kind: protocol.ProbeCertFiles, CertFile: spec.TLS.CertFile, KeyFile: spec.TLS.KeyFile}
+	if err := h.Hub.Request(ctx, in.NodeID, protocol.TypeProbe, req, &res); err != nil {
+		return nil // 旧版被控端不支持探测时不阻塞保存
+	}
+	if !res.OK {
+		return fmt.Errorf("证书文件不可用：%s", res.Error)
+	}
+	return nil
+}
+
 // checkPort 在服务器在线时确认端口未被其他程序占用；离线时跳过，由下发时的配置校验兜底。
 func (h *Handler) checkPort(ctx context.Context, nodeID int64, port int) error {
 	if !h.Hub.State(nodeID).Online {
@@ -122,6 +150,10 @@ func (h *Handler) createInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.checkPort(r.Context(), in.NodeID, in.Port); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.checkCerts(r.Context(), in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -162,6 +194,10 @@ func (h *Handler) updateInbound(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if err := h.checkCerts(r.Context(), in); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if err := h.Store.UpdateInbound(in); err != nil {
 		writeInboundError(w, err)
@@ -228,7 +264,8 @@ func (h *Handler) inboundLinks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]link, 0, len(subs))
 	for _, sb := range subs {
-		out = append(out, link{sb.ID, sb.Name, model.ShareLink(spec, target, sb.UUID)})
+		cred := model.CredentialFor(in.Protocol, spec, sb.UUID, sb.Secret, in.ID)
+		out = append(out, link{sb.ID, sb.Name, model.ShareLink(in.Protocol, spec, target, cred)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"links": out, "enabled": in.Enabled})
 }
@@ -258,6 +295,16 @@ func (h *Handler) x25519(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"privateKey": strings.TrimSpace(req.PrivateKey), "publicKey": pub})
+}
+
+// ssKey 生成指定加密方式的 SS2022 服务端密钥。
+func (h *Handler) ssKey(w http.ResponseWriter, r *http.Request) {
+	key, ok := model.GenerateSSKey(r.URL.Query().Get("method"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "不支持的加密方式")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"key": key})
 }
 
 func (h *Handler) shortID(w http.ResponseWriter, r *http.Request) {

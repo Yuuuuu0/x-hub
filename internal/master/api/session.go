@@ -53,6 +53,9 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 		out["authenticated"] = true
 		out["username"] = s.Username
 		out["publicUrlSet"] = h.Settings.Access().PublicURL != ""
+		if a, err := h.Store.AdminByID(s.AdminID); err == nil {
+			out["totpEnabled"] = a.TOTPSecret != ""
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -67,6 +70,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Code     string `json:"code"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -78,6 +82,17 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.Log.Warn("login failed", "ip", ip, "username", req.Username)
 		writeError(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
+	}
+	if admin.TOTPSecret != "" {
+		if req.Code == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "请输入两步验证码", "needTotp": true})
+			return
+		}
+		if !auth.VerifyTOTP(admin.TOTPSecret, req.Code, time.Now()) {
+			h.limiter.Fail(ip)
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "两步验证码错误", "needTotp": true})
+			return
+		}
 	}
 	h.limiter.Reset(ip)
 	token := auth.RandomToken()
@@ -142,6 +157,54 @@ func (h *Handler) putAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"username": req.Username})
+}
+
+// totpSetup 生成待启用的两步验证密钥，确认验证码后才会保存。
+func (h *Handler) totpSetup(w http.ResponseWriter, r *http.Request) {
+	secret := auth.NewTOTPSecret()
+	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "uri": auth.TOTPURI(secret, sessionFrom(r).Username)})
+}
+
+// totpEnable 校验验证码后启用两步验证。
+func (h *Handler) totpEnable(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Secret string `json:"secret"`
+		Code   string `json:"code"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !auth.VerifyTOTP(req.Secret, req.Code, time.Now()) {
+		writeError(w, http.StatusBadRequest, "验证码错误，请确认手机时间准确后重试")
+		return
+	}
+	if err := h.Store.SetAdminTOTP(sessionFrom(r).AdminID, strings.ToUpper(strings.TrimSpace(req.Secret))); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// totpDisable 校验当前密码后关闭两步验证。
+func (h *Handler) totpDisable(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	admin, err := h.Store.AdminByID(sessionFrom(r).AdminID)
+	if err != nil || !auth.VerifyPassword(req.Password, admin.PasswordHash) {
+		writeError(w, http.StatusBadRequest, "当前密码错误")
+		return
+	}
+	if err := h.Store.SetAdminTOTP(admin.ID, ""); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func truncate(s string, n int) string {

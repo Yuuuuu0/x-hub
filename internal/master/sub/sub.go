@@ -3,6 +3,7 @@ package sub
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,12 +18,16 @@ import (
 type Format string
 
 const (
-	FormatBase64 Format = "base64" // v2rayN / v2rayNG / Shadowrocket / NekoBox 等
-	FormatMihomo Format = "mihomo" // Mihomo（Clash Meta）/ Clash Verge / Stash 等
+	FormatBase64  Format = "base64"  // v2rayN / v2rayNG / Shadowrocket / NekoBox 等
+	FormatMihomo  Format = "mihomo"  // Mihomo（Clash Meta）/ Clash Verge / Stash 等
+	FormatSingBox Format = "singbox" // sing-box 官方客户端（SFA / SFI / SFM）
 )
 
-// mihomoUAKeywords 为识别 Mihomo 系客户端的 User-Agent 关键字（小写）。
-var mihomoUAKeywords = []string{"mihomo", "clash", "stash", "meta"}
+// 识别客户端的 User-Agent 关键字（小写）。sing-box 优先，避免被泛化的关键字误判。
+var (
+	singboxUAKeywords = []string{"sing-box", "sfa/", "sfi/", "sfm/", "sft/"}
+	mihomoUAKeywords  = []string{"mihomo", "clash", "stash", "meta"}
+)
 
 // DetectFormat 决定输出格式：显式参数优先，否则按 User-Agent 识别，默认 Base64。
 func DetectFormat(userAgent, override string) Format {
@@ -31,8 +36,15 @@ func DetectFormat(userAgent, override string) Format {
 		return FormatBase64
 	case FormatMihomo, "clash":
 		return FormatMihomo
+	case FormatSingBox, "sing-box":
+		return FormatSingBox
 	}
 	ua := strings.ToLower(userAgent)
+	for _, k := range singboxUAKeywords {
+		if strings.Contains(ua, k) {
+			return FormatSingBox
+		}
+	}
 	for _, k := range mihomoUAKeywords {
 		if strings.Contains(ua, k) {
 			return FormatMihomo
@@ -41,11 +53,12 @@ func DetectFormat(userAgent, override string) Format {
 	return FormatBase64
 }
 
-// Node 为订阅中的一个节点。
+// Node 为订阅中的一个节点。SingBox 为空表示 sing-box 不支持该协议组合。
 type Node struct {
-	Name   string
-	Link   string
-	Mihomo model.MihomoProxy
+	Name    string
+	Link    string
+	Mihomo  model.MihomoProxy
+	SingBox map[string]any
 }
 
 // Target 计算入站对外的连接信息与按模板生成的名称。
@@ -108,7 +121,12 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string) ([]Nod
 			if seen[t.Name]++; seen[t.Name] > 1 {
 				t.Name = fmt.Sprintf("%s %d", t.Name, seen[t.Name])
 			}
-			out = append(out, Node{Name: t.Name, Link: model.ShareLink(spec, t, s.UUID), Mihomo: model.Mihomo(spec, t, s.UUID)})
+			cred := model.CredentialFor(in.Protocol, spec, s.UUID, s.Secret, in.ID)
+			sb, _ := model.SingBox(in.Protocol, spec, t, cred)
+			out = append(out, Node{
+				Name: t.Name, Link: model.ShareLink(in.Protocol, spec, t, cred),
+				Mihomo: model.Mihomo(in.Protocol, spec, t, cred), SingBox: sb,
+			})
 		}
 	}
 	return out, nil
@@ -116,9 +134,13 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string) ([]Nod
 
 // Render 按格式渲染订阅内容，返回内容与 Content-Type。
 func Render(f Format, nodes []Node) ([]byte, string, error) {
-	if f == FormatMihomo {
+	switch f {
+	case FormatMihomo:
 		b, err := renderMihomo(nodes)
 		return b, "text/yaml; charset=utf-8", err
+	case FormatSingBox:
+		b, err := renderSingBox(nodes)
+		return b, "application/json; charset=utf-8", err
 	}
 	links := make([]string, len(nodes))
 	for i, n := range nodes {
@@ -178,6 +200,69 @@ func renderMihomo(nodes []Node) ([]byte, error) {
 		"MATCH," + groupSelect,
 	}
 	return yaml.Marshal(cfg)
+}
+
+// renderSingBox 生成 sing-box 配置（1.12+ 格式）：TUN 与本地 mixed 入站、手动 / 自动选择、
+// 局域网与国内直连。sing-box 不支持的节点（XHTTP）不输出。
+func renderSingBox(nodes []Node) ([]byte, error) {
+	names := []string{}
+	var outbounds []any
+	for _, n := range nodes {
+		if n.SingBox != nil {
+			outbounds = append(outbounds, n.SingBox)
+			names = append(names, n.Name)
+		}
+	}
+	selectList := []string{}
+	if len(names) > 0 {
+		selectList = append(selectList, groupAuto)
+	}
+	selectList = append(append(selectList, names...), "direct")
+	groups := []any{map[string]any{"type": "selector", "tag": groupSelect, "outbounds": selectList}}
+	if len(names) > 0 {
+		groups = append(groups, map[string]any{
+			"type": "urltest", "tag": groupAuto, "outbounds": names,
+			"url": "https://www.gstatic.com/generate_204", "interval": "5m", "tolerance": 50,
+		})
+	}
+	outbounds = append(append(groups, outbounds...), map[string]any{"type": "direct", "tag": "direct"})
+	// 不设置 download_detour：它在 1.14 被弃用，而替代的 http_client 在 1.12 / 1.13 上无法解析；
+	// 留空时规则集经默认出站（route.final，即节点选择）下载，各版本均可用。
+	ruleSet := func(tag, repo string) map[string]any {
+		return map[string]any{
+			"type": "remote", "tag": tag, "format": "binary",
+			"url": "https://raw.githubusercontent.com/SagerNet/" + repo + "/rule-set/" + tag + ".srs",
+		}
+	}
+	cfg := map[string]any{
+		"log": map[string]any{"level": "warn", "timestamp": true},
+		"dns": map[string]any{
+			"servers": []any{
+				map[string]any{"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": groupSelect},
+				map[string]any{"type": "udp", "tag": "local", "server": "223.5.5.5"},
+			},
+			"rules": []any{map[string]any{"rule_set": "geosite-cn", "server": "local"}},
+			"final": "remote",
+		},
+		"inbounds": []any{
+			map[string]any{"type": "tun", "tag": "tun-in", "address": []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"}, "auto_route": true, "strict_route": true},
+			map[string]any{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080},
+		},
+		"outbounds": outbounds,
+		"route": map[string]any{
+			"rules": []any{
+				map[string]any{"action": "sniff"},
+				map[string]any{"protocol": "dns", "action": "hijack-dns"},
+				map[string]any{"ip_is_private": true, "outbound": "direct"},
+				map[string]any{"rule_set": []string{"geosite-cn", "geoip-cn"}, "outbound": "direct"},
+			},
+			"rule_set":                []any{ruleSet("geosite-cn", "sing-geosite"), ruleSet("geoip-cn", "sing-geoip")},
+			"final":                   groupSelect,
+			"auto_detect_interface":   true,
+			"default_domain_resolver": "local",
+		},
+	}
+	return json.MarshalIndent(cfg, "", "  ")
 }
 
 // UserInfo 生成 subscription-userinfo 响应头，客户端据此展示用量、总量与到期时间。

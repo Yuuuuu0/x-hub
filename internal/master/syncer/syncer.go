@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	debounce     = 300 * time.Millisecond
-	applyTimeout = 2 * time.Minute
+	debounce = 300 * time.Millisecond
+	// applyTimeout 需覆盖首次 ACME 申请证书（DNS 验证传播）的耗时。
+	applyTimeout = 5 * time.Minute
 )
 
 // 同步状态。
@@ -32,6 +33,8 @@ type Syncer struct {
 	hub   *hub.Hub
 	log   *slog.Logger
 
+	acme func() (email, token string) // 读取 ACME 账户邮箱与 Cloudflare Token
+
 	mu      sync.Mutex
 	kicks   map[int64]chan struct{}
 	desired map[int64]string // 最近一次编译出的配置哈希
@@ -41,6 +44,9 @@ type Syncer struct {
 func New(st *store.Store, h *hub.Hub, log *slog.Logger) *Syncer {
 	return &Syncer{store: st, hub: h, log: log, kicks: map[int64]chan struct{}{}, desired: map[int64]string{}}
 }
+
+// SetACME 设置 ACME 凭据来源。
+func (s *Syncer) SetACME(fn func() (email, token string)) { s.acme = fn }
 
 // Trigger 请求同步某台服务器，短时间内的多次触发会合并。
 func (s *Syncer) Trigger(nodeID int64) {
@@ -118,11 +124,12 @@ func (s *Syncer) worker(nodeID int64, ch chan struct{}) {
 
 // syncOnce 编译期望配置，与已应用哈希不一致且服务器在线时下发。
 func (s *Syncer) syncOnce(nodeID int64) error {
-	cfg, hash, err := compiler.Node(s.store, nodeID)
+	res, err := compiler.Node(s.store, nodeID)
 	if err != nil {
 		s.store.SetNodeSyncError(nodeID, "配置编译失败："+err.Error())
 		return err
 	}
+	hash := res.Hash
 	s.mu.Lock()
 	s.desired[nodeID] = hash
 	s.mu.Unlock()
@@ -140,11 +147,16 @@ func (s *Syncer) syncOnce(nodeID int64) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), applyTimeout)
 	defer cancel()
-	var res protocol.ApplyResult
-	if err := s.hub.Request(ctx, nodeID, protocol.TypeApply, protocol.Apply{Rev: rev, Hash: hash, Config: cfg}, &res); err != nil {
+	apply := protocol.Apply{Rev: rev, Hash: hash, Config: res.Config}
+	if len(res.ACMEDomains) > 0 && s.acme != nil {
+		email, token := s.acme()
+		apply.ACME = &protocol.ACME{Email: email, CloudflareToken: token, Domains: res.ACMEDomains}
+	}
+	var applied protocol.ApplyResult
+	if err := s.hub.Request(ctx, nodeID, protocol.TypeApply, apply, &applied); err != nil {
 		s.store.SetNodeSyncError(nodeID, err.Error())
 		return err
 	}
-	s.log.Info("config applied", "node", nodeID, "rev", res.Rev, "hash", res.Hash)
-	return s.store.SetNodeApplied(nodeID, res.Rev, res.Hash)
+	s.log.Info("config applied", "node", nodeID, "rev", applied.Rev, "hash", applied.Hash)
+	return s.store.SetNodeApplied(nodeID, applied.Rev, applied.Hash)
 }

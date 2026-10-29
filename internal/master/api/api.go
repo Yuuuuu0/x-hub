@@ -36,6 +36,7 @@ type Handler struct {
 	Releases      *xrayrel.Service
 	Log           *slog.Logger
 	Web           fs.FS  // 前端构建产物根目录
+	DataDir       string // 数据目录，备份时用于存放临时快照
 	AgentDir      string // 各架构被控端二进制所在目录
 	InstallScript []byte
 
@@ -53,6 +54,12 @@ func (h *Handler) Init() {
 	m.HandleFunc("POST /api/login", h.login)
 	m.HandleFunc("POST /api/logout", h.authed(h.logout))
 	m.HandleFunc("PUT /api/account", h.authed(h.putAccount))
+	m.HandleFunc("POST /api/account/totp/setup", h.authed(h.totpSetup))
+	m.HandleFunc("POST /api/account/totp/enable", h.authed(h.totpEnable))
+	m.HandleFunc("POST /api/account/totp/disable", h.authed(h.totpDisable))
+	m.HandleFunc("GET /api/backup", h.authed(h.backup))
+	m.HandleFunc("PUT /api/nodes/{id}/xray-pin", h.authed(h.pinXray))
+	m.HandleFunc("POST /api/xray/batch-install", h.authed(h.batchInstall))
 	m.HandleFunc("GET /api/nodes", h.authed(h.listNodes))
 	m.HandleFunc("POST /api/nodes", h.authed(h.createNode))
 	m.HandleFunc("PUT /api/nodes/{id}", h.authed(h.updateNode))
@@ -76,6 +83,8 @@ func (h *Handler) Init() {
 	m.HandleFunc("POST /api/subscriptions/{id}/reset-traffic", h.authed(h.resetSubscriptionTraffic))
 	m.HandleFunc("GET /api/subscriptions/{id}/traffic", h.authed(h.subscriptionTraffic))
 	m.HandleFunc("PUT /api/settings/stats", h.authed(h.putStatsSettings))
+	m.HandleFunc("PUT /api/settings/certs", h.authed(h.putCertsSettings))
+	m.HandleFunc("GET /api/tools/ss-key", h.authed(h.ssKey))
 	m.HandleFunc("PUT /api/settings/subscription", h.authed(h.putSubscriptionSettings))
 	m.HandleFunc("POST /api/tools/x25519", h.authed(h.x25519))
 	m.HandleFunc("GET /api/tools/short-id", h.authed(h.shortID))
@@ -147,6 +156,9 @@ func (h *Handler) OnAgentHello(nodeID int64, hello protocol.Hello) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	ver, err := h.defaultXrayVersion(ctx)
+	if n, e := h.Store.GetNode(nodeID); e == nil && n.XrayPinned != "" {
+		ver, err = n.XrayPinned, nil
+	}
 	if err != nil {
 		h.Log.Warn("resolve default xray version", "err", err)
 		return

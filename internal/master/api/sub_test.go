@@ -92,6 +92,14 @@ func TestSubscriptionEndpoint(t *testing.T) {
 		t.Fatal("format override ignored")
 	}
 
+	rec = fetchSub(h, s.Token, "SFA/1.12.0 (Android)", "")
+	var sb struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sb); err != nil || len(sb.Outbounds) != 5 || sb.Outbounds[2]["type"] != "vless" {
+		t.Fatalf("sing-box: %v %s", err, rec.Body.String())
+	}
+
 	// 限定入站范围后只输出授权的入站。
 	if err := h.Store.SetSubscriptionScope(subID, false, []int64{i1}); err != nil {
 		t.Fatal(err)
