@@ -1,0 +1,389 @@
+# x-hub 架构设计
+
+> 状态：定稿 v1 · 2026-10-29
+> 许可证：MIT
+
+## 1. 产品定位
+
+面向个人自用与亲友轻量分享的**主从分离版 3x-ui**：一台主控（Master）通过 Web 表单集中管理多台 VPS 上的 Xray，被控端（Agent）无 Web 界面、无管理端口。
+
+**目标**
+
+- 一行命令接入被控 VPS，集中查看状态、资源、流量，控制 Xray 启停与版本。
+- 纯表单创建/修改入站，主控自动编译 Xray 配置并下发，全程不手写 JSON。
+- 多订阅（成员）：每个订阅一条聚合链接，凭据自动注入各节点，按订阅跨服务器统计流量，支持限额、到期、停用。
+- 保留单节点分享链接 / 二维码导出。
+
+**非目标**
+
+- 商业计费、套餐、订单、用户注册、工单。
+- Inbound/Host/Squad 等多层映射模板。
+- 多管理员、高可用、设备数强制限制。
+
+## 2. 术语
+
+| 术语 | 含义 |
+|---|---|
+| 服务器（Node） | 一台运行 Agent 的 VPS |
+| 入站（Inbound） | 某台服务器上的一个 Xray 入站，即用户眼中的"节点" |
+| 订阅（Subscription） | 一个成员/使用者，拥有一条聚合订阅链接与一组派生凭据 |
+
+## 3. 总体架构
+
+```
+                       ┌──────────────────── Master (xhub-master) ─────────────────────┐
+  浏览器 ──HTTPS──▶    │  Vue3 + Ant Design Vue（embed）                                │
+                       │  REST API ── Service ── Store(SQLite)                         │
+  客户端 ──HTTPS──▶    │  订阅渲染：Base64 / Mihomo / sing-box                          │
+                       │  Compiler：领域模型 → Xray JSON / 分享链接 / Clash / sing-box   │
+                       │  NodeHub：Agent 长连接、期望版本、指令下发                     │
+                       │  Accounting：流量入库、额度/到期判定 → 触发重编译              │
+                       └──────────────▲────────────────────────────────────────────────┘
+                                      │ WSS（Agent 主动外连）
+             ┌────────────────────────┼────────────────────────┐
+     ┌───────┴────────┐       ┌───────┴────────┐       ┌───────┴────────┐
+     │ xhub-agent     │       │ xhub-agent     │       │ xhub-agent     │
+     │ ├ 配置应用器   │       └────────────────┘       └────────────────┘
+     │ ├ 流量账本     │
+     │ ├ 系统指标     │
+     │ └ Xray 进程管理│──gRPC(127.0.0.1)──▶ xray（子进程）
+     └────────────────┘
+```
+
+**核心原则**
+
+- **主控是唯一事实来源**，配置以声明式"期望版本"下发，Agent 收敛到期望状态。
+- **控制面与数据面解耦**：主控宕机时各节点 Xray 按最后一份本地配置继续运行；恢复后自动对齐。
+- Agent 只执行白名单指令，不提供远程 shell。
+
+### 技术栈
+
+| 层 | 选型 |
+|---|---|
+| Master / Agent | Go，单 module、两个静态二进制；复用 `xray-core` 的 gRPC proto 与账户类型 |
+| 前端 | Vue 3 + Vite + TypeScript + Ant Design Vue + Lucide，`embed` 进 Master |
+| 存储 | SQLite（纯 Go 驱动，WAL） |
+| HTTP / WS | 标准库 `net/http` + `coder/websocket` |
+| 主从协议 | WebSocket + JSON 消息 |
+
+## 4. 主从通信
+
+### 4.1 接入
+
+```
+curl -fsSL https://<master>/install.sh | bash -s -- \
+  --master wss://<master>/agent/ws --token <一次性令牌> [--fp <证书SHA256指纹>]
+```
+
+1. 主控添加服务器时生成一次性接入令牌（1 小时有效，库中只存哈希）。
+2. Agent 用令牌换取长期 `node secret`（本地 0600 保存），令牌作废。
+3. 后续连接：`Authorization: Bearer <node_id>.<secret>`，主控只存 secret 的 SHA-256。
+4. `--fp` 可选：传入则锁定证书公钥指纹（SPKI SHA-256，base64，与 `curl --pinnedpubkey` 同格式，自签模式），否则走系统 CA。
+5. `install.sh` 与 Agent 二进制由主控提供，保证主从版本一致。
+
+### 4.2 连接生命周期
+
+```
+Agent                                          Master
+  │── WSS + Bearer ───────────────────────────────▶│ 校验；同节点旧连接踢下线
+  │── hello{agent_ver, xray_ver, caps,            │
+  │         applied_rev, applied_hash, ledger_head}▶│
+  │◀─ welcome{server_time, ack_seq} ───────────────│ Agent 据 ack_seq 清理账本
+  │◀─ apply{rev, config}（hash 不一致时）──────────│
+  │── heartbeat(15s) / traffic(30s) ──────────────▶│ 45s 无消息判离线
+  │◀─ ack{seq} / 指令 ─────────────────────────────│
+```
+
+断线重连：指数退避 1s → 60s，带抖动；凭据被拒（401）时退避 5 分钟。15s 心跳 + 30s WebSocket Ping 满足 Cloudflare 100s 空闲超时；Xray 状态变化时立即补发一次心跳。
+
+**地址迁移**：Agent 在本地保存主控地址候选列表（最多 3 个），按顺序尝试。主控在 `welcome` 中携带当前推荐地址，修改访问设置时向在线 Agent 广播 `endpoint`；Agent 把推荐地址置为首选、旧地址保留为回退，通过首选地址连接成功后丢弃回退地址。因此修改端口、域名或 TLS 模式时，在线被控端不会失联。
+
+### 4.3 消息
+
+信封：`{ "t": "<type>", "id": "<req id>", "re": "<reply to>", "d": { ... } }`。主控指令带 `id`，Agent 以 `result{re, ok, err, data}` 应答；普通指令超时 30s，升级 5min。
+
+| 类型 | 方向 | 要点 |
+|---|---|---|
+| `hello` | A→M | 版本、能力、已应用版本与哈希、账本最早未确认 seq |
+| `heartbeat` | A→M | cpu/mem/disk/load/uptime、网卡累计计数、xray 状态、在线快照 |
+| `traffic` | A→M | `seq`、`hour`、`items[{email, up, down}]`、`nic{rx, tx}` |
+| `apply` | M→A | `rev` + 完整配置；Agent 串行处理，`rev ≤ applied` 忽略 |
+| `users` | M→A | `rev` + `add[]/remove[]`，gRPC 增删用户不重启，并同步本地配置文件 |
+| `endpoint` | M→A | 主控推荐地址变更 `{url, fp}` |
+| `xray` | M→A | `start/stop/restart/install{version}`；安装包经主控中转，摘要通过 `X-Content-Sha256` 响应头下发 |
+| `probe` | M→A | `reality_dest{host}`、`port_free{port}` |
+| `logs` | M→A | 读取最近 N 行日志（环形缓冲） |
+
+## 5. 配置编译与下发
+
+```
+UI 保存 → DB 事务 → node.desired_rev++ → Compiler（纯函数）生成完整 Xray JSON
+       → apply{rev, config}
+Agent：xray -test 校验 → 原子写盘 → 应用 → 回报 applied_rev/hash
+重连：hello 中 hash 不一致则重推
+```
+
+界面显示每台服务器 **已同步 / 待同步 / 失败（原因）**。
+
+| 变更 | 应用方式 |
+|---|---|
+| 订阅增减、超额、到期、停用 | `users` 消息 → gRPC `AlterInbound`，不重启 |
+| 入站参数（端口、SNI、密钥等） | 重启 Xray（仅影响该服务器） |
+| 路由 / 出站 / 全局设置 | 重启 Xray |
+
+重启或升级 Xray 前，Agent 先读取一次流量并写入账本。
+
+**Agent 自管段**：`api`（监听 `127.0.0.1:<随机端口>`）、`stats`、`policy` 中的用户统计开关由 Agent 维护并注入，主控编译的配置不包含这些段。本地无配置时 Agent 写入只含这些段的基础配置，保证 Xray 可先行启动。
+
+## 6. 领域模型
+
+入站不存 Xray JSON，以 Go 的有类型结构（按 `protocol` / `transport` / `security` 判别的联合类型）存为 `spec_json`。同一份模型统一产出四种结果，配合 golden file 测试保证一致：
+
+```
+Inbound
+  ├─ ToXrayInbound(clients)  服务端配置
+  ├─ ToShareLink(cred)       vless:// 等分享链接
+  ├─ ToMihomo(cred)          Clash/Mihomo proxy
+  └─ ToSingbox(cred)         sing-box outbound
+```
+
+**v1 协议范围**
+
+- VLESS + TCP + Reality + Vision
+- VLESS + XHTTP + Reality
+- VLESS / VMess + WS + TLS
+- Trojan + TLS
+- Shadowsocks 2022
+
+**辅助能力**
+
+- X25519 密钥对、ShortID 由主控以 `crypto/ecdh` 生成；Reality 私钥存主控，公钥派生用于链接。
+- 伪装目标探测由 Agent 在本机网络执行（TLS1.3 / H2 / 延迟），内置常用 SNI 快选。
+- 保存前由 Agent 检查端口占用。
+- 全局 Xray 行为（屏蔽 BT、屏蔽私有 IP、IPv4/IPv6 优先、DNS）以开关呈现。
+- 较新的协议特性默认关闭并标注"部分客户端不支持"，默认产物保证主流客户端（含 Shadowrocket）可用。
+
+## 7. 订阅与凭据
+
+- 订阅链接 `token` 与连接凭据 `secret` 分离：重置链接不影响凭据，轮换凭据不改链接。
+- 凭据由 `secret` 确定性派生，无需"订阅×入站"凭据表：
+  - VLESS / VMess：订阅 `uuid`
+  - Trojan：`HMAC(secret, "trojan")`
+  - SS2022：`HKDF(secret, inbound_id)`，按 method 截取所需长度
+- Xray client email 统一为 `s{subId}.i{inboundId}`，统计天然细到"订阅 × 入站"。
+- 入站生效 clients = `enabled 且 state=active 的订阅` ∩ `(all_inbounds 或 在授权表中)`。
+- 订阅地址：`<public_url>/<sub_path>/{token}`，`sub_path` 可在设置中修改，默认与面板路径不同。
+  - 按 User-Agent 自动选择格式，`?format=` 可强制。
+  - 返回 `subscription-userinfo`、`profile-update-interval`、`content-disposition` 头。
+  - Mihomo 使用内置精简模板（select + url-test + 基础规则）。
+
+## 8. 流量统计与额度
+
+### 8.1 采集与上报
+
+1. Agent 每 10s `QueryStats(reset=true)` 读取 `user>>>*>>>traffic>>>*` 增量。
+2. 增量写入本地账本（原子写文件）；同一小时合并为一个批次并分配递增 `seq`，离线期间各批次保留原小时归属。
+3. 上报 `traffic`；主控在单事务内 UPSERT `traffic_hourly`、累加订阅 `used_*`、更新 `nodes.last_seq`，`seq ≤ last_seq` 直接 ack 不入库。
+4. Agent 收到 ack 后删除对应批次。断网期间流量不丢。
+5. 网卡计数器变小（机器重启）时视为新基线，按增量上报。
+
+### 8.2 额度控制
+
+- 流量入库后检查受影响订阅；每分钟扫描一次到期。
+- 超额 / 到期 → 更新 `state` → 对相关服务器下发 `users.remove`。
+- 支持按月重置（`reset_day`），重置时清零当前周期用量并恢复 `state`。
+
+### 8.3 在线 IP / 设备数
+
+- 仅在 Xray 支持 `online_stats` 能力的节点启用：配置开启 `statsUserOnline`，心跳携带 `email → [ip]` 快照。
+- 主控在内存中按订阅取并集，展示在线 IP 与去重设备数，并记录每小时峰值。
+- 只展示，不做限制。
+
+## 9. Xray 版本与能力
+
+**能力判定 = 静态能力表 ∧ 运行时探测**
+
+```go
+// internal/shared/xraycap
+type Feature string
+
+const (
+    FeatOnlineStats Feature = "online_stats"
+    FeatXHTTP       Feature = "xhttp"
+)
+
+var minVersion = map[Feature]Version{ /* M1 对照官方 changelog 填写 */ }
+```
+
+- Agent 在 `hello` 上报版本，并对 `online_stats` 等 API 实际探测（`codes.Unimplemented` 即不支持）。
+- 主控存入 `nodes.capabilities_json`；Compiler 据此决定写入哪些字段，前端据此隐藏不支持的功能。
+
+**版本管理**
+
+- 系统设置：默认安装版本、可选版本上限；升级列表只显示不超过上限的版本。
+- 单服务器可锁定版本，批量升级跳过。
+- Xray 安装包由主控中转：主控从 GitHub 下载、校验 sha256 并缓存，Agent 从 `/dl/xray/{ver}/{arch}` 获取。
+- 测试矩阵：**v26.7.28** 与最新版。最低支持版本取 v1 所用特性要求的最高版本。
+
+## 10. 访问、证书与系统设置
+
+### 10.1 原则
+
+**凡能在 Web 设置页修改的参数一律存数据库，不通过环境变量配置。** 容器部署仅需挂载数据目录（及可选的证书目录）。
+
+### 10.2 首次启动
+
+1. 无配置时使用默认值：监听 `:2096`，TLS 模式 `selfsigned`，随机面板路径。
+2. 生成初始管理员账号密码，与访问地址一并打印到日志。
+3. 首次登录后，`public_url` 以浏览器访问地址预填，引导管理员确认。
+
+### 10.3 访问模式（Web 设置）
+
+| 模式 | 场景 | 行为 | Agent 校验 |
+|---|---|---|---|
+| `proxy` | 前置 Nginx / Caddy / Cloudflare | 仅监听 HTTP | 系统 CA |
+| `file` | 证书由外部脚本续签 | 读取证书文件，握手时按 mtime 热加载 | 系统 CA |
+| `selfsigned` | 无域名 | 自动生成证书 | 安装命令带 `--fp` |
+
+- 修改监听地址、端口、TLS 模式、面板路径时：先校验（端口可绑定、证书可加载），再在进程内平滑重启 HTTP 服务，前端跳转到新地址；校验失败拒绝保存。
+- `trusted_proxies`：Cloudflare / 反代场景下从 `CF-Connecting-IP` / `X-Forwarded-For` 取真实 IP。
+- Cloudflare 橙云仅代理 443 / 2053 / 2083 / 2087 / 2096 / 8443 等端口，默认端口取 2096。
+
+### 10.4 设置项一览
+
+| 分组 | 设置项 |
+|---|---|
+| 访问 | 监听地址与端口、面板路径、public_url、TLS 模式、证书/私钥路径、可信代理 |
+| 订阅 | 订阅路径、更新间隔、节点命名模板 |
+| Xray | 默认安装版本、版本上限、全局路由开关 |
+| 统计 | 时区、明细保留天数 |
+| 安全 | 管理员账号密码、TOTP、会话时长 |
+
+### 10.5 应急命令
+
+误配置导致无法访问时，通过 CLI 恢复（容器内 `docker exec -it xhub xhub-master ...`）：
+
+| 命令 | 作用 |
+|---|---|
+| `xhub-master settings show` | 打印当前访问配置 |
+| `xhub-master settings reset-access` | 恢复 `:2096` + `selfsigned` + 新随机面板路径 |
+| `xhub-master admin reset` | 重置管理员密码并关闭 TOTP |
+
+## 11. 部署
+
+### 11.1 主控（Docker）
+
+镜像 `ghcr.io/<owner>/xhub-master`，amd64 / arm64，基于 distroless（内嵌 `time/tzdata`），镜像内附各架构 Agent 二进制。
+
+```yaml
+services:
+  xhub:
+    image: ghcr.io/<owner>/xhub-master:latest
+    container_name: xhub
+    restart: unless-stopped
+    network_mode: host          # 面板改端口无需改映射，且能拿到真实客户端 IP
+    volumes:
+      - ./data:/data
+      # 使用自有证书时挂载证书所在目录（只读），再到「设置 → 访问」填写容器内路径。
+      # 挂载目录而非单个文件：续签替换文件后单文件挂载会失效。
+      # certbot 的 live/ 是指向 archive/ 的符号链接，需挂载整个 /etc/letsencrypt。
+      # - /etc/ssl/xhub:/certs:ro
+```
+
+也提供二进制 + systemd 的安装方式。
+
+### 11.2 被控端
+
+- 一行命令安装，systemd 以专用用户运行，仅授予 `CAP_NET_BIND_SERVICE`。
+- Xray 作为 Agent 子进程托管：崩溃自动拉起、日志环形缓冲、升级失败回滚。
+- 主控所在机器作为节点时，Agent 直接装在宿主机，按普通服务器接入。
+
+## 12. 数据模型（SQLite）
+
+```sql
+admins(id, username, password_hash /*argon2id*/, totp_secret, created_at)
+sessions(id, admin_id, token_hash, ip, ua, expire_at)
+settings(key PK, value_json)
+
+nodes(
+  id, name, remark, sort, enabled,
+  public_host,
+  secret_hash,
+  desired_rev, desired_hash, applied_rev, applied_hash,
+  sync_state /*pending|ok|failed*/, sync_error,
+  agent_version, xray_version, xray_pinned_version, capabilities_json,
+  last_seen_at, last_seq,
+  net_reset_day, net_quota_bytes,
+  created_at
+)
+enroll_tokens(id, node_id, token_hash, expire_at, used_at)
+
+inbounds(
+  id, node_id /*FK CASCADE*/, tag /*in-{id}*/, remark, sort, enabled,
+  listen, port, protocol, spec_json,
+  link_host_override, link_port_override,
+  created_at, updated_at,
+  UNIQUE(node_id, port)
+)
+
+subscriptions(
+  id, name, note, sort,
+  token UNIQUE, secret, uuid,
+  enabled, state /*active|exceeded|expired*/,
+  all_inbounds,
+  limit_bytes, expire_at, reset_day,
+  period_start_at, used_up, used_down,
+  created_at
+)
+subscription_inbounds(sub_id, inbound_id, PK(sub_id, inbound_id))  -- 双向 FK CASCADE
+
+traffic_hourly(hour, sub_id, inbound_id, node_id, up, down, PK(hour, sub_id, inbound_id))
+traffic_daily (day,  sub_id, inbound_id, node_id, up, down, PK(day,  sub_id, inbound_id))
+node_traffic_hourly(hour, node_id, rx, tx, PK(hour, node_id))
+online_peak_hourly(hour, sub_id, peak_ips, PK(hour, sub_id))
+```
+
+- 流量表不建外键、冗余 `node_id`：删除服务器或入站后历史保留，前端显示"已删除"。
+- 当前周期用量读 `subscriptions.used_*`；历史从流量表聚合。
+- 小时明细默认保留 90 天，之后按统计时区汇总入 `traffic_daily`。
+- 实时指标与在线 IP 明细只在内存。
+
+## 13. 安全要点
+
+- Agent 无管理端口；Xray API 仅监听 `127.0.0.1`。
+- Agent 只接受白名单指令，无远程 shell。
+- 接入令牌一次性、短时效；节点 secret、会话 token、接入令牌在库中只存哈希。
+- 面板路径随机化、登录限流、可选 TOTP。
+- 订阅路径与面板路径分离，分享链接不暴露面板入口。
+
+## 14. 目录结构
+
+```
+x-hub/
+├─ cmd/{master,agent}/
+├─ internal/
+│  ├─ master/{api, service, store, hub, compiler, sub, accounting, settings}
+│  ├─ agent/{conn, applier, xray, ledger, metrics}
+│  └─ shared/{protocol, model, xraycap}
+├─ web/                      # Vue3 + Ant Design Vue
+├─ deploy/{install.sh, systemd, docker-compose.yml}
+└─ docs/
+```
+
+## 15. 里程碑
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| M1 | 仓库骨架、首次启动与设置、管理员登录、一行命令接入、WS 长连接、心跳与指标、Xray 安装启停、能力探测 | 两台 VPS 接入后状态显示正常 |
+| M2 | VLESS + Reality + Vision 表单、Compiler、下发与同步状态、分享链接与二维码 | 网页建节点后客户端可连通；完成 Vision 流量计数实测 |
+| M3 | 订阅 CRUD、凭据派生与注入、订阅接口（Base64 + Mihomo） | 三个订阅各自可用且凭据互不相同 |
+| M4 | 流量账本上报、统计图表、额度/到期/停用、按月重置、在线 IP | 断网 10 分钟恢复后流量不丢 |
+| M5 | 其余协议、sing-box 格式、Xray 升级与回滚、TOTP、备份导出 | — |
+
+## 16. 待验证事项
+
+| 事项 | 时机 |
+|---|---|
+| XTLS Vision 在 Linux splice 场景下用户流量计数是否准确 | M2 |
+| 能力表中各特性的最低 Xray 版本（已确认 v26.7.28 支持 `online_stats`） | M2 |
+| v26.7.28 下 Shadowrocket 对各协议组合的兼容性 | M2 / M5 |
