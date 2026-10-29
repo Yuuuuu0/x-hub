@@ -63,6 +63,7 @@ type HostInfo struct {
 	Arch            string `json:"arch"`
 	CPUModel        string `json:"cpuModel"`
 	CPUCores        int    `json:"cpuCores"`
+	Country         string `json:"country,omitempty"` // 出口 IP 所在国家或地区（ISO 3166-1 两位代码），检测失败时为空
 }
 
 // XrayStatus 为被控端 Xray 进程状态。

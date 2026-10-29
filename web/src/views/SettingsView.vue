@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
-import { Cloud, Download, FileKey, ShieldCheck, Shuffle } from 'lucide-vue-next'
+import { Cloud, Download, FileKey, ShieldCheck, Shuffle, WandSparkles } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { BASE, api, session, type AccessSettings, type AllSettings, type Release, type TLSMode } from '../lib/api'
 
@@ -37,9 +37,39 @@ const releasesLoading = ref(false)
 const subSettings = reactive({ path: '', updateHours: 12, nameTemplate: '' })
 const statsSettings = reactive({ timezone: 'Asia/Shanghai', retentionDays: 90 })
 const TIMEZONES = ['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'UTC'].map((value) => ({ value }))
-const namePreview = computed(() =>
-  subSettings.nameTemplate.replace(/\{node\}/g, '东京-01').replace(/\{remark\}/g, '主力').replace(/\{port\}/g, '443').replace(/\s+/g, ' ').trim(),
-)
+/** 推荐的节点名称格式：地区-入站备注|剩余流量|剩余天数。 */
+const RECOMMENDED_NAME = '{flag} {region}-{remark}|📊{traffic}|⏳{days}'
+const NAME_VARS = [
+  ['flag', '旗帜'],
+  ['region', '地区'],
+  ['remark', '入站备注'],
+  ['node', '服务器名称'],
+  ['port', '端口'],
+  ['traffic', '剩余流量'],
+  ['days', '剩余天数'],
+]
+const SAMPLE: Record<string, string> = { flag: '🇯🇵', region: '日本', remark: 'acck', node: '东京-01', port: '443', traffic: '1.14TB', days: '69D' }
+
+/** 与主控 sub.RenderName 一致：以 | 分段，某段变量全部为空时省略，并去掉首尾连接符。 */
+function renderName(tmpl: string, vars: Record<string, string>) {
+  return tmpl
+    .split('|')
+    .map((seg) => {
+      let hasVar = false
+      let filled = false
+      const out = seg.replace(/\{([a-z]+)\}/g, (m, k) => {
+        if (!(k in vars)) return m
+        hasVar = true
+        if (vars[k]) filled = true
+        return vars[k]
+      })
+      return hasVar && !filled ? '' : out.replace(/\s+/g, ' ').replace(/^[\s\-_·]+|[\s\-_·]+$/g, '')
+    })
+    .filter(Boolean)
+    .join('|')
+}
+const namePreview = computed(() => renderName(subSettings.nameTemplate, SAMPLE))
+const namePreviewBare = computed(() => renderName(subSettings.nameTemplate, { ...SAMPLE, remark: '', traffic: '', days: '' }))
 
 const sessionHours = ref(168)
 const account = reactive({ username: '', currentPassword: '', newPassword: '', confirm: '' })
@@ -398,8 +428,26 @@ async function saveAccount() {
             <a-form-item label="自动更新间隔（小时）" extra="通过 profile-update-interval 告知客户端。">
               <a-input-number v-model:value="subSettings.updateHours" :min="1" :max="168" class="num" />
             </a-form-item>
-            <a-form-item label="节点名称模板" :extra="`可用变量 {node} {remark} {port}。预览：${namePreview || '（空）'}`">
-              <a-input v-model:value="subSettings.nameTemplate" class="mono" placeholder="{node} {remark}" />
+            <a-form-item label="节点名称模板">
+              <a-input v-model:value="subSettings.nameTemplate" class="mono" :placeholder="RECOMMENDED_NAME">
+                <template #suffix>
+                  <a-tooltip title="使用推荐格式">
+                    <button type="button" class="icon-inline" @click="subSettings.nameTemplate = RECOMMENDED_NAME"><WandSparkles :size="15" /></button>
+                  </a-tooltip>
+                </template>
+              </a-input>
+              <div class="tmpl-help">
+                <p class="vars">
+                  <span v-for="[k, label] in NAME_VARS" :key="k"><code class="mono">{{ '{' + k + '}' }}</code>{{ label }}</span>
+                </p>
+                <p class="muted">以 | 分段，某段中的变量都为空时整段省略（如服务器未设置流量配额或到期时间）。剩余流量与天数取自服务器的 VPS 套餐设置。</p>
+                <p class="preview">
+                  <span class="muted">预览</span><span class="mono">{{ namePreview || '（空）' }}</span>
+                </p>
+                <p class="preview">
+                  <span class="muted">无备注与套餐</span><span class="mono">{{ namePreviewBare || '（空，使用服务器名称）' }}</span>
+                </p>
+              </div>
             </a-form-item>
           </div>
           <div class="actions">
@@ -710,6 +758,47 @@ h1 {
   justify-content: flex-end;
 }
 
+.icon-inline {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.icon-inline:hover {
+  color: var(--text);
+}
+.tmpl-help {
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+.tmpl-help p {
+  margin: 0 0 6px;
+}
+.vars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--text-2);
+}
+.vars code {
+  margin-right: 4px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+}
+.preview {
+  display: flex;
+  gap: 10px;
+}
+.preview .muted {
+  flex: none;
+  width: 84px;
+}
 .num {
   width: 180px;
 }

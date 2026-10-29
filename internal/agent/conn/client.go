@@ -91,6 +91,12 @@ func (c *Client) Run(ctx context.Context) {
 
 // session 建立一次连接并运行到断开。connected 表示是否曾成功握手。
 func (c *Client) session(ctx context.Context, ep protocol.Endpoint, idx int) (connected bool, err error) {
+	if c.host.Country == "" {
+		// 每次连接前补测，启动时网络未就绪导致的失败可在重连时恢复。
+		gctx, gcancel := context.WithTimeout(ctx, 6*time.Second)
+		c.host.Country = metrics.DetectCountry(gctx)
+		gcancel()
+	}
 	dctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	ws, resp, err := websocket.Dial(dctx, wsURL(ep.URL), &websocket.DialOptions{

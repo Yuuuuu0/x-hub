@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,8 +17,10 @@ import (
 
 	"github.com/Yuuuuu0/x-hub/internal/master/accounting"
 	"github.com/Yuuuuu0/x-hub/internal/master/auth"
+	"github.com/Yuuuuu0/x-hub/internal/master/geo"
 	"github.com/Yuuuuu0/x-hub/internal/master/hub"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
+	"github.com/Yuuuuu0/x-hub/internal/master/sub"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 	"github.com/Yuuuuu0/x-hub/internal/shared/tlspin"
 	"github.com/Yuuuuu0/x-hub/internal/shared/xraycap"
@@ -26,18 +29,79 @@ import (
 
 const enrollTokenTTL = time.Hour
 
-// nodeView 为服务器列表项：持久化字段 + 内存运行时状态 + 配置同步状态 + 当前计费周期流量。
+// nodeView 为服务器列表项：持久化字段 + 内存运行时状态 + 配置同步状态 + 当前计费周期流量 + 地区。
 type nodeView struct {
 	*store.Node
 	Runtime   hub.RuntimeState `json:"runtime"`
 	SyncState string           `json:"syncState"`
 	NetPeriod netPeriod        `json:"netPeriod"`
+	Geo       nodeGeo          `json:"geo"`
 }
 
 type netPeriod struct {
 	Start int64 `json:"start"`
 	Rx    int64 `json:"rx"`
 	Tx    int64 `json:"tx"`
+	Used  int64 `json:"used"` // 按计费方式计算的已用流量
+}
+
+// nodeGeo 为服务器的有效地区：手动指定优先，否则为被控端检测结果。
+type nodeGeo struct {
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	Flag     string `json:"flag"`
+	Detected string `json:"detected"` // 被控端检测到的代码
+}
+
+func geoOf(n *store.Node) nodeGeo {
+	g := nodeGeo{Code: n.Country, Detected: n.Host.Country}
+	if g.Code == "" {
+		g.Code = g.Detected
+	}
+	if g.Code != "" {
+		g.Name, g.Flag = geo.Name(g.Code), geo.Flag(g.Code)
+	}
+	if n.Region != "" {
+		g.Name = n.Region
+	}
+	return g
+}
+
+// netUsage 返回服务器本计费周期的流量，Used 按服务器的计费方式计算。
+func (h *Handler) netUsage(n *store.Node, now time.Time) netPeriod {
+	p := netPeriod{Start: accounting.PeriodStart(n.NetResetDay, now, h.Settings.Location()).Unix()}
+	p.Rx, p.Tx, _ = h.Store.NodeTrafficSince(n.ID, p.Start)
+	switch n.NetCountMode {
+	case "tx":
+		p.Used = p.Tx
+	case "max":
+		p.Used = max(p.Rx, p.Tx)
+	default:
+		p.Used = p.Rx + p.Tx
+	}
+	return p
+}
+
+// nameVars 返回节点名称模板中服务器相关变量的计算函数，同一次调用内按服务器缓存。
+func (h *Handler) nameVars() func(*store.Node) sub.NameVars {
+	now := time.Now()
+	cache := map[int64]sub.NameVars{}
+	return func(n *store.Node) sub.NameVars {
+		if v, ok := cache[n.ID]; ok {
+			return v
+		}
+		g := geoOf(n)
+		v := sub.NameVars{Flag: g.Flag, Region: g.Name}
+		if n.NetQuota > 0 {
+			v.Traffic = sub.FormatRemaining(n.NetQuota - h.netUsage(n, now).Used)
+		}
+		if n.ExpireAt > 0 {
+			days := (n.ExpireAt - now.Unix() + 86399) / 86400
+			v.Days = fmt.Sprintf("%dD", max(days, 0))
+		}
+		cache[n.ID] = v
+		return v
+	}
 }
 
 func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
@@ -47,33 +111,35 @@ func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]nodeView, 0, len(nodes))
-	now, loc := time.Now(), h.Settings.Location()
+	now := time.Now()
 	for _, n := range nodes {
-		v := nodeView{Node: n, Runtime: h.Hub.State(n.ID), SyncState: h.Syncer.State(n)}
-		v.NetPeriod.Start = accounting.PeriodStart(n.NetResetDay, now, loc).Unix()
-		v.NetPeriod.Rx, v.NetPeriod.Tx, _ = h.Store.NodeTrafficSince(n.ID, v.NetPeriod.Start)
-		out = append(out, v)
+		out = append(out, nodeView{Node: n, Runtime: h.Hub.State(n.ID), SyncState: h.Syncer.State(n), NetPeriod: h.netUsage(n, now), Geo: geoOf(n)})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": out, "masterVersion": version.Version})
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": out, "masterVersion": version.Version, "countries": geo.List()})
 }
 
-type nodeInput struct {
-	Name        string `json:"name"`
-	Remark      string `json:"remark"`
-	PublicHost  string `json:"publicHost"`
-	NetResetDay int    `json:"netResetDay"`
-	NetQuota    int64  `json:"netQuotaBytes"`
-}
+type nodeInput = store.NodeSettings
 
-func (in *nodeInput) validate() error {
+var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
+
+// validateNode 校验并规范化服务器表单。
+func validateNode(in *nodeInput) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Remark = strings.TrimSpace(in.Remark)
 	in.PublicHost = strings.TrimSpace(in.PublicHost)
+	in.Country = strings.ToUpper(strings.TrimSpace(in.Country))
+	in.Region = strings.TrimSpace(in.Region)
 	if n := utf8.RuneCountInString(in.Name); n < 1 || n > 32 {
 		return errors.New("名称长度需在 1 到 32 之间")
 	}
 	if utf8.RuneCountInString(in.Remark) > 200 {
 		return errors.New("备注不能超过 200 字")
+	}
+	if in.Country != "" && !countryCode.MatchString(in.Country) {
+		return errors.New("国家或地区代码无效")
+	}
+	if utf8.RuneCountInString(in.Region) > 16 || strings.ContainsAny(in.Region, ",=|") {
+		return errors.New("地区名称不超过 16 个字，且不能包含逗号、等号或竖线")
 	}
 	if in.NetResetDay == 0 {
 		in.NetResetDay = 1
@@ -81,8 +147,15 @@ func (in *nodeInput) validate() error {
 	if in.NetResetDay < 1 || in.NetResetDay > 28 {
 		return errors.New("流量重置日需在 1 到 28 之间")
 	}
-	if in.NetQuota < 0 {
-		return errors.New("流量配额不能为负数")
+	if in.NetQuota < 0 || in.ExpireAt < 0 {
+		return errors.New("流量配额与到期时间不能为负数")
+	}
+	switch in.NetCountMode {
+	case "":
+		in.NetCountMode = "both"
+	case "both", "tx", "max":
+	default:
+		return errors.New("流量计费方式无效")
 	}
 	// 恰好一个冒号意味着带了端口；IPv6 地址含多个冒号，允许。
 	if strings.ContainsAny(in.PublicHost, "/@ []") || strings.Count(in.PublicHost, ":") == 1 {
@@ -97,13 +170,13 @@ func (h *Handler) createNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := in.validate(); err != nil {
+	if err := validateNode(&in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	id, err := h.Store.CreateNode(in.Name, in.Remark, in.PublicHost)
 	if err == nil {
-		err = h.Store.UpdateNode(id, in.Name, in.Remark, in.PublicHost, in.NetResetDay, in.NetQuota)
+		err = h.Store.UpdateNode(id, &in)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -123,11 +196,11 @@ func (h *Handler) updateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := in.validate(); err != nil {
+	if err := validateNode(&in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.Store.UpdateNode(id, in.Name, in.Remark, in.PublicHost, in.NetResetDay, in.NetQuota); err != nil {
+	if err := h.Store.UpdateNode(id, &in); err != nil {
 		writeStoreError(w, err)
 		return
 	}

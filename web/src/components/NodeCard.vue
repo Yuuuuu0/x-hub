@@ -51,10 +51,19 @@ const meters = computed(() => {
 
 const period = computed(() => {
   const p = props.node.netPeriod
-  const used = p.rx + p.tx
   const quota = props.node.netQuotaBytes
-  const pct = quota ? percent(used, quota) : 0
-  return { ...p, used, quota, pct, tone: meterTone(pct) }
+  const pct = quota ? percent(p.used, quota) : 0
+  return { ...p, quota, pct, tone: meterTone(pct) }
+})
+
+/** VPS 到期提示：剩余 7 天内标黄，已到期标红。 */
+const expiry = computed(() => {
+  const at = props.node.expireAt
+  if (!at) return null
+  const days = Math.ceil((at * 1000 - Date.now()) / 86400000)
+  const date = new Date(at * 1000).toLocaleDateString('zh-CN')
+  if (days <= 0) return { text: `VPS 已于 ${date} 到期`, tone: 'bad' }
+  return { text: `VPS ${date} 到期 · 剩 ${days} 天`, tone: days <= 7 ? 'warn' : '' }
 })
 
 const rx = computed(() => bytesParts(rt.value.rxRate))
@@ -87,7 +96,12 @@ function onMenu({ key }: { key: string | number }) {
     <header class="top">
       <span :class="['dot', status]" />
       <div class="title">
-        <h3>{{ node.name }}</h3>
+        <h3>
+          {{ node.name }}
+          <a-tooltip v-if="node.geo.code" :title="node.country ? '手动指定' : '按出口 IP 自动识别'">
+            <span class="geo"><b class="mono">{{ node.geo.code }}</b>{{ node.geo.name }}</span>
+          </a-tooltip>
+        </h3>
         <p class="sub mono">
           {{ node.publicHost || '—' }}<template v-if="sys"> · {{ sys }}</template>
         </p>
@@ -146,6 +160,7 @@ function onMenu({ key }: { key: string | number }) {
           <span v-if="period.quota" class="mono muted p-quota">{{ bytes(period.used) }} / {{ bytes(period.quota) }}</span>
         </div>
         <div v-if="period.quota" class="bar"><i :class="period.tone" :style="{ width: `${period.pct}%` }" /></div>
+        <p v-if="expiry" :class="['p-expire', expiry.tone]">{{ expiry.text }}</p>
       </div>
 
       <footer class="foot">
@@ -191,6 +206,43 @@ function onMenu({ key }: { key: string | number }) {
 </template>
 
 <style scoped>
+.geo {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 1px 8px 1px 3px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  vertical-align: 3px;
+}
+.geo b {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--lime);
+  font-size: 10px;
+  font-weight: 600;
+}
+:root[data-theme='dark'] .geo b {
+  background: var(--lime);
+  color: var(--ink);
+}
+.p-expire {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.p-expire.warn {
+  color: var(--warn);
+}
+.p-expire.bad {
+  color: var(--bad);
+}
 .card {
   position: relative;
   display: flex;

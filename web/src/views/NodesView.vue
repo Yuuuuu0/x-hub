@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import { Layers, Plus } from 'lucide-vue-next'
-import { api, type NodeItem } from '../lib/api'
+import { api, type CountryItem, type NodeItem } from '../lib/api'
 import { bytesParts } from '../lib/format'
 import NodeCard from '../components/NodeCard.vue'
 import NodeFormModal from '../components/NodeFormModal.vue'
@@ -14,6 +14,7 @@ import BatchUpgradeModal from '../components/BatchUpgradeModal.vue'
 const POLL_MS = 5000
 
 const nodes = ref<NodeItem[]>([])
+const countries = ref<CountryItem[]>([])
 const masterVersion = ref('')
 const loaded = ref(false)
 const busy = ref<Record<number, boolean>>({})
@@ -29,9 +30,10 @@ let timer: number | undefined
 
 async function load() {
   try {
-    const r = await api.get<{ nodes: NodeItem[]; masterVersion: string }>('nodes')
+    const r = await api.get<{ nodes: NodeItem[]; masterVersion: string; countries: CountryItem[] }>('nodes')
     nodes.value = r.nodes
     masterVersion.value = r.masterVersion
+    countries.value = r.countries
   } catch (e: any) {
     if (!loaded.value) message.error(e.message)
   } finally {
@@ -184,7 +186,7 @@ function remove(n: NodeItem) {
       />
     </TransitionGroup>
 
-    <NodeFormModal v-model:open="showForm" :node="current" @saved="onSaved" />
+    <NodeFormModal v-model:open="showForm" :node="current" :countries="countries" @saved="onSaved" />
     <InstallCommandModal v-model:open="showInstall" :node="current" />
     <XrayInstallModal v-model:open="showVersions" :node="current" @done="load" />
     <LogsDrawer v-model:open="showLogs" :node="current" />

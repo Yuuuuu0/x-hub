@@ -60,7 +60,7 @@ type Security struct {
 type Subscription struct {
 	Path         string `json:"path"`         // 订阅地址的一级路径，与面板路径分离
 	UpdateHours  int    `json:"updateHours"`  // 建议客户端的自动更新间隔
-	NameTemplate string `json:"nameTemplate"` // 节点名称模板，支持 {node} {remark} {port}
+	NameTemplate string `json:"nameTemplate"` // 节点名称模板，变量见 sub.Target
 }
 
 // Stats 为流量统计设置。
@@ -75,8 +75,8 @@ type Certs struct {
 	CloudflareToken string `json:"cloudflareToken"`
 }
 
-// DefaultNameTemplate 为默认节点名称模板。
-const DefaultNameTemplate = "{node} {remark}"
+// DefaultNameTemplate 为默认节点名称模板：地区-入站备注|剩余流量|剩余天数，如 🇯🇵 日本-acck|📊1.14TB|⏳69D。
+const DefaultNameTemplate = "{flag} {region}-{remark}|📊{traffic}|⏳{days}"
 
 // Service 为设置的读写入口，读操作走内存缓存。
 type Service struct {

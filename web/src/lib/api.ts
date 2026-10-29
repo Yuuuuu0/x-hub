@@ -99,8 +99,14 @@ export interface NodeItem {
   syncState: SyncState
   netResetDay: number
   netQuotaBytes: number
-  netPeriod: { start: number; rx: number; tx: number }
+  netCountMode: 'both' | 'tx' | 'max'
+  netPeriod: { start: number; rx: number; tx: number; used: number }
   xrayPinnedVersion: string
+  country: string
+  region: string
+  expireAt: number
+  /** 有效地区：手动指定优先，否则为被控端检测结果；detected 为检测到的代码。 */
+  geo: { code: string; name: string; flag: string; detected: string }
   runtime: {
     online: boolean
     connectedAt: number
@@ -111,6 +117,12 @@ export interface NodeItem {
     xray: XrayStatus
     caps: string[] | null
   }
+}
+
+export interface CountryItem {
+  code: string
+  name: string
+  flag: string
 }
 
 export type TLSMode = 'proxy' | 'file' | 'selfsigned'

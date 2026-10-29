@@ -32,6 +32,10 @@ type Node struct {
 	NetResetDay  int               `json:"netResetDay"`       // 服务器流量计费周期的重置日（1-28）
 	NetQuota     int64             `json:"netQuotaBytes"`     // 服务器每周期流量配额，0 表示不限
 	XrayPinned   string            `json:"xrayPinnedVersion"` // 锁定的 Xray 版本，批量升级时跳过
+	Country      string            `json:"country"`           // 手动指定的国家或地区代码，空表示使用自动检测结果
+	Region       string            `json:"region"`            // 自定义地区名称，空表示按国家或地区代码显示
+	ExpireAt     int64             `json:"expireAt"`          // VPS 到期时间，0 表示未设置
+	NetCountMode string            `json:"netCountMode"`      // 流量计费方式：both / tx / max
 
 	secretHash string
 }
@@ -41,7 +45,7 @@ func (n *Node) SecretHash() string { return n.secretHash }
 
 const nodeColumns = `id, name, remark, sort, public_host, secret_hash, agent_version, xray_version,
 	capabilities_json, host_info_json, last_ip, last_seen_at, created_at, desired_rev, applied_rev, applied_hash, sync_error,
-	last_seq, net_reset_day, net_quota_bytes, xray_pinned_version`
+	last_seq, net_reset_day, net_quota_bytes, xray_pinned_version, country, region, expire_at, net_count_mode`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -50,7 +54,8 @@ func scanNode(r rowScanner) (*Node, error) {
 	var caps, host string
 	if err := r.Scan(&n.ID, &n.Name, &n.Remark, &n.Sort, &n.PublicHost, &n.secretHash, &n.AgentVersion,
 		&n.XrayVersion, &caps, &host, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.DesiredRev, &n.AppliedRev,
-		&n.AppliedHash, &n.SyncError, &n.LastSeq, &n.NetResetDay, &n.NetQuota, &n.XrayPinned); err != nil {
+		&n.AppliedHash, &n.SyncError, &n.LastSeq, &n.NetResetDay, &n.NetQuota, &n.XrayPinned, &n.Country, &n.Region,
+		&n.ExpireAt, &n.NetCountMode); err != nil {
 		return nil, err
 	}
 	n.Enrolled = n.secretHash != ""
@@ -95,10 +100,24 @@ func (s *Store) CreateNode(name, remark, publicHost string) (int64, error) {
 		name, remark, publicHost, time.Now().Unix())
 }
 
+// NodeSettings 为服务器的可编辑字段。
+type NodeSettings struct {
+	Name         string `json:"name"`
+	Remark       string `json:"remark"`
+	PublicHost   string `json:"publicHost"`
+	NetResetDay  int    `json:"netResetDay"`
+	NetQuota     int64  `json:"netQuotaBytes"`
+	NetCountMode string `json:"netCountMode"`
+	Country      string `json:"country"`
+	Region       string `json:"region"`
+	ExpireAt     int64  `json:"expireAt"`
+}
+
 // UpdateNode 更新服务器的可编辑字段。
-func (s *Store) UpdateNode(id int64, name, remark, publicHost string, netResetDay int, netQuota int64) error {
-	return s.execOne("UPDATE nodes SET name = ?, remark = ?, public_host = ?, net_reset_day = ?, net_quota_bytes = ? WHERE id = ?",
-		name, remark, publicHost, netResetDay, netQuota, id)
+func (s *Store) UpdateNode(id int64, in *NodeSettings) error {
+	return s.execOne(`UPDATE nodes SET name = ?, remark = ?, public_host = ?, net_reset_day = ?, net_quota_bytes = ?, net_count_mode = ?,
+		country = ?, region = ?, expire_at = ? WHERE id = ?`,
+		in.Name, in.Remark, in.PublicHost, in.NetResetDay, in.NetQuota, in.NetCountMode, in.Country, in.Region, in.ExpireAt, id)
 }
 
 // DeleteNode 删除服务器。

@@ -27,7 +27,7 @@ type outNode struct {
 // subscriptionNodes 收集订阅可用的全部节点：自有节点在前，随后为可见且启用的外部节点。
 // 外部节点名称加前缀并与已有名称去重；前置入站不在此订阅中的来源整体跳过并返回提示。
 func (h *Handler) subscriptionNodes(s *store.Subscription) ([]outNode, []string, error) {
-	own, err := sub.Collect(h.Store, s, h.Settings.Subscription().NameTemplate)
+	own, err := sub.Collect(h.Store, s, h.Settings.Subscription().NameTemplate, h.nameVars())
 	if err != nil {
 		return nil, nil, err
 	}

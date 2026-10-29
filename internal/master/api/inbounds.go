@@ -247,7 +247,7 @@ func (h *Handler) inboundLinks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	target := sub.Target(node, in, h.Settings.Subscription().NameTemplate)
+	target := sub.Target(node, in, h.Settings.Subscription().NameTemplate, h.nameVars()(node))
 	if target.Host == "" {
 		writeError(w, http.StatusBadRequest, "服务器未设置公网地址，请先编辑服务器或在入站中填写链接地址")
 		return

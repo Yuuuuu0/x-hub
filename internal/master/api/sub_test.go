@@ -7,11 +7,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/Yuuuuu0/x-hub/internal/master/model"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
+	"github.com/Yuuuuu0/x-hub/internal/master/sub"
+	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 )
 
 // addInbound 在服务器上创建一个合法的 Reality 入站。
@@ -115,5 +118,27 @@ func TestSubscriptionEndpoint(t *testing.T) {
 	}
 	if rec = fetchSub(h, "nope", "", ""); rec.Code != 404 {
 		t.Fatalf("unknown token must 404, got %d", rec.Code)
+	}
+}
+
+// TestNodeNameVars 覆盖地区（检测与手动指定）、按计费方式计算的剩余流量与剩余天数。
+func TestNodeNameVars(t *testing.T) {
+	h := newTestHandler(t)
+	id, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	h.Store.UpdateNodeRuntime(id, "dev", "", nil, protocol.HostInfo{Country: "JP"}, "1.2.3.4")
+	n, _ := h.Store.GetNode(id)
+	if v := h.nameVars()(n); v.Flag != "🇯🇵" || v.Region != "日本" || v.Traffic != "" || v.Days != "" {
+		t.Fatalf("detected: %+v", v)
+	}
+	expire := time.Now().Add(69*24*time.Hour - time.Hour).Unix()
+	h.Store.UpdateNode(id, &store.NodeSettings{Name: "东京", PublicHost: "jp.example.com", NetResetDay: 1, NetQuota: 2 << 40,
+		NetCountMode: "tx", Country: "HK", Region: "香港 CMI", ExpireAt: expire})
+	n, _ = h.Store.GetNode(id)
+	if v := h.nameVars()(n); v.Flag != "🇭🇰" || v.Region != "香港 CMI" || v.Traffic != "2TB" || v.Days != "69D" {
+		t.Fatalf("manual: %+v", v)
+	}
+	in := &store.Inbound{Remark: "acck", Port: 443}
+	if got := sub.Target(n, in, h.Settings.Subscription().NameTemplate, h.nameVars()(n)).Name; got != "🇭🇰 香港 CMI-acck|📊2TB|⏳69D" {
+		t.Fatalf("name: %q", got)
 	}
 }
