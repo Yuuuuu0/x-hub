@@ -438,18 +438,34 @@ x-hub/
 - **链式代理**：来源可设置前置，作用于其全部节点：
   - 经由某个自有入站：订阅中不含该入站时，这些节点不输出；
   - 经由方案中的某个分组：方案没有该分组，或节点自身被该分组（直接或间接）包含时，这些节点不输出，并在预览中提示。
-  - Mihomo 输出为 `dialer-proxy`；Base64 无法表达链式代理，带前置的节点不出现在 Base64 中；sing-box 在阶段三输出为 `detour`（此前外部节点不输出到 sing-box）。
+  - Mihomo 输出为 `dialer-proxy`；Base64 无法表达链式代理，带前置的节点不出现在 Base64 中；sing-box 输出为 `detour`。
 - **可见范围**：全部订阅或指定订阅（默认不可见，需显式选择），停用的来源不输出。外部节点不经过 Xray，没有流量统计。
 - **内置精简方案**改为由分流渲染器生成（与旧输出等价），自有节点与外部节点走同一条渲染路径。
 
-### 16.4 阶段
+### 16.4 sing-box 渲染（阶段三）
+
+- 基础配置为 JSON 原文，为空时使用默认模板；`outbounds`、`route.rule_set`、`route.final` 由方案生成，基础配置中的 `route.rules`（sniff、hijack-dns 等）排在方案规则之前。
+- 分组：select → selector，url-test → urltest；fallback / load-balance 以 urltest 代替并提示。直连出站标签为 `DIRECT`，分组成员可直接引用。sing-box 没有 REJECT 出站：从成员中移除，只含 REJECT 的分组视为拒绝分组，以它为目标的规则输出 `action: reject`（REJECT-DROP 为 `method: drop`）。
+- 规则：域名 / IP / 端口 / 进程 / 网络类规则逐条转换；GEOIP LAN → `ip_is_private`，GEOSITE / GEOIP 其他值 → SagerNet 官方 `geosite-*` / `geoip-*` 二进制规则集；第一条需要目标 IP 且未设 no-resolve 的规则前插入 `action: resolve`，与 Mihomo 的解析行为一致。RAW（逻辑规则）、IP-ASN 跳过并提示。MATCH → `route.final`。
+- 规则集：规则集库中的规则集统一指向主控的 `<名称>.json`（sing-box 源格式）：托管规则集直接转换；外部规则集由主控拉取 Mihomo YAML / text 后转换，按更新间隔缓存在内存中，拉取失败时使用旧内容；mrs 无法转换。基础配置中引用的规则集（如 DNS 规则的 `geosite-cn`）一并定义。
+- 主控提供的规则集以 `download_detour: DIRECT` 直连下载（与订阅本身一致，避免节点不可用时客户端无法启动）；该字段在 1.14 起提示弃用，1.16 前需改为按客户端版本输出 `http_clients`。
+- 节点：自有节点沿用原有转换；外部节点由 Mihomo 定义转换为 sing-box 出站，前置输出为 `detour`；XHTTP 等 sing-box 不支持的节点跳过并提示。
+
+### 16.5 Shadowrocket 渲染
+
+- 输出 Shadowrocket 配置（Surge 兼容的 `.conf`），只能以 `?format=shadowrocket` 显式获取：Shadowrocket 拉取订阅与配置时 User-Agent 相同，无法自动区分。节点不写入配置，仍由同一订阅的通用（Base64）链接导入；分组直接列出节点名称，因此只引用通用订阅中存在的节点（有分享链接且没有前置），名称含逗号或等号的节点跳过。
+- 基础配置为 `[General]` 等段落原文，为空时使用默认模板；`[Proxy Group]` 与 `[Rule]` 由方案生成。
+- 分组类型与 Mihomo 同名直接输出（select / url-test / fallback / load-balance）。规则：DOMAIN / DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR / IP-CIDR6 / IP-ASN / GEOIP / DST-PORT（单个端口）原样输出；GEOIP LAN 展开为私有地址段；MATCH → FINAL。GEOSITE、DOMAIN-REGEX、进程、端口范围、RAW 跳过并提示。
+- 规则集统一指向主控的 `<名称>.list`（「类型,值」列表）：domain 行为的 `+.` / `.` 转为 DOMAIN-SUFFIX，通配符转为 DOMAIN-WILDCARD；外部规则集与 sing-box 共用拉取缓存。
+
+### 16.6 阶段
 
 | 阶段 | 内容 |
 |---|---|
 | 一 | 分流方案、规则集库与托管、导入 Mihomo YAML、Mihomo 渲染与预览、订阅选择方案 |
 | 二 | 外部节点、外部订阅、链式代理 |
 | 三 | sing-box 渲染与规则集格式转换 |
-| 未来 | Shadowrocket 渲染（iOS 分流） |
+| 四 | Shadowrocket 渲染（iOS 分流） |
 
 ## 17. 待验证事项
 
