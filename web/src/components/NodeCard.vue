@@ -180,6 +180,7 @@ function onMenu({ key }: { key: string | number }) {
           <SyncChip :node="node" class="sync" @retried="emit('synced')" />
           <span v-if="online && hb">已运行 {{ duration(hb.uptime) }}</span>
           <span v-if="online && hb">累计 ↓{{ bytes(hb.netRx) }} ↑{{ bytes(hb.netTx) }}</span>
+          <span v-if="node.xrayPinnedVersion">锁定 {{ node.xrayPinnedVersion }}</span>
           <a-tooltip v-if="agentOutdated" :title="`主控版本为 ${masterVersion}，可通过重装命令更新被控端`">
             <span class="outdated">Agent {{ node.agentVersion }}</span>
           </a-tooltip>

@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Lock, User } from 'lucide-vue-next'
+import { ArrowRight, Lock, ShieldCheck, User } from 'lucide-vue-next'
 import { ApiError, api, loadSession, session } from '../lib/api'
 
 const router = useRouter()
 const route = useRoute()
-const form = reactive({ username: '', password: '' })
+const form = reactive({ username: '', password: '', code: '' })
 const loading = ref(false)
 const error = ref('')
+const needTotp = ref(false)
 
 async function submit() {
   if (!form.username || !form.password) {
@@ -23,7 +24,13 @@ async function submit() {
     const next = typeof route.query.next === 'string' && route.query.next.startsWith('/') ? route.query.next : '/nodes'
     router.replace(next)
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : '登录失败'
+    if (e instanceof ApiError && e.data?.needTotp) {
+      // 首次提示输入验证码时不算错误
+      error.value = needTotp.value ? e.message : ''
+      needTotp.value = true
+    } else {
+      error.value = e instanceof ApiError ? e.message : '登录失败'
+    }
   } finally {
     loading.value = false
   }
@@ -63,6 +70,19 @@ async function submit() {
         <a-input-password v-model:value="form.password" size="large" placeholder="密码" autocomplete="current-password">
           <template #prefix><Lock :size="16" class="ico" /></template>
         </a-input-password>
+        <a-input
+          v-if="needTotp"
+          v-model:value="form.code"
+          size="large"
+          class="mono"
+          placeholder="6 位两步验证码"
+          :maxlength="6"
+          autocomplete="one-time-code"
+          inputmode="numeric"
+          autofocus
+        >
+          <template #prefix><ShieldCheck :size="16" class="ico" /></template>
+        </a-input>
         <p v-if="error" class="error">{{ error }}</p>
         <a-button type="primary" size="large" html-type="submit" block :loading="loading" class="submit">
           进入控制台

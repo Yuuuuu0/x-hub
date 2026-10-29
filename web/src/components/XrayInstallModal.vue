@@ -10,6 +10,7 @@ const emit = defineEmits<{ done: [] }>()
 
 const releases = ref<Release[]>([])
 const selected = ref<string>()
+const pin = ref(false)
 const loading = ref(false)
 const installing = ref(false)
 const error = ref('')
@@ -31,10 +32,11 @@ watch(open, async (v) => {
   if (!v) return
   loading.value = true
   error.value = ''
+  pin.value = !!props.node?.xrayPinnedVersion
   try {
     const r = await api.get<{ releases: Release[]; default: string }>('xray/releases')
     releases.value = r.releases
-    selected.value = r.default || undefined
+    selected.value = props.node?.xrayPinnedVersion || r.default || undefined
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -46,8 +48,14 @@ async function install() {
   if (!props.node || !selected.value) return
   installing.value = true
   try {
-    await api.post(`nodes/${props.node.id}/xray`, { action: 'install', version: selected.value })
-    message.success(`已切换到 Xray ${selected.value}`)
+    if (selected.value !== current.value) {
+      await api.post(`nodes/${props.node.id}/xray`, { action: 'install', version: selected.value })
+    }
+    const wantPin = pin.value ? selected.value : ''
+    if (wantPin !== (props.node.xrayPinnedVersion || '')) {
+      await api.put(`nodes/${props.node.id}/xray-pin`, { version: wantPin })
+    }
+    message.success(pin.value ? `已切换并锁定 Xray ${selected.value}` : `已切换到 Xray ${selected.value}`)
     open.value = false
     emit('done')
   } catch (e: any) {
@@ -65,7 +73,7 @@ async function install() {
     :width="480"
     :ok-text="installing ? '安装中…' : '安装'"
     :confirm-loading="installing"
-    :ok-button-props="{ disabled: !selected || selected === current }"
+    :ok-button-props="{ disabled: !selected || (selected === current && pin === !!node?.xrayPinnedVersion && (!pin || selected === node?.xrayPinnedVersion)) }"
     :mask-closable="!installing"
     :closable="!installing"
     @ok="install"
@@ -85,6 +93,7 @@ async function install() {
         </div>
       </template>
     </a-select>
+    <a-checkbox v-if="!error" v-model:checked="pin" class="pin">锁定为此版本（批量升级时保持该版本，新装 Xray 也使用它）</a-checkbox>
   </a-modal>
 </template>
 
@@ -94,6 +103,9 @@ async function install() {
 }
 .select {
   width: 100%;
+}
+.pin {
+  margin-top: 14px;
 }
 .opt {
   display: flex;

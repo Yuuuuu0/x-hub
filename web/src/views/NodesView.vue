@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
-import { Plus } from 'lucide-vue-next'
+import { Layers, Plus } from 'lucide-vue-next'
 import { api, type NodeItem } from '../lib/api'
 import { bytesParts } from '../lib/format'
 import NodeCard from '../components/NodeCard.vue'
@@ -9,6 +9,7 @@ import NodeFormModal from '../components/NodeFormModal.vue'
 import InstallCommandModal from '../components/InstallCommandModal.vue'
 import XrayInstallModal from '../components/XrayInstallModal.vue'
 import LogsDrawer from '../components/LogsDrawer.vue'
+import BatchUpgradeModal from '../components/BatchUpgradeModal.vue'
 
 const POLL_MS = 5000
 
@@ -22,6 +23,7 @@ const showForm = ref(false)
 const showInstall = ref(false)
 const showVersions = ref(false)
 const showLogs = ref(false)
+const showBatch = ref(false)
 
 let timer: number | undefined
 
@@ -121,10 +123,16 @@ function remove(n: NodeItem) {
         <p class="eyebrow mono">NODES / {{ String(stats.total).padStart(2, '0') }}</p>
         <h1>服务器</h1>
       </div>
-      <a-button type="primary" size="large" class="add" @click="openForm(null)">
-        <Plus :size="17" />
-        添加服务器
-      </a-button>
+      <div class="hero-acts">
+        <a-button v-if="nodes.some((n) => n.enrolled)" size="large" class="add" @click="showBatch = true">
+          <Layers :size="17" />
+          批量切换 Xray
+        </a-button>
+        <a-button type="primary" size="large" class="add" @click="openForm(null)">
+          <Plus :size="17" />
+          添加服务器
+        </a-button>
+      </div>
     </header>
 
     <div v-if="stats.total" class="strip">
@@ -180,6 +188,7 @@ function remove(n: NodeItem) {
     <InstallCommandModal v-model:open="showInstall" :node="current" />
     <XrayInstallModal v-model:open="showVersions" :node="current" @done="load" />
     <LogsDrawer v-model:open="showLogs" :node="current" />
+    <BatchUpgradeModal v-model:open="showBatch" :nodes="nodes" @done="load" />
   </section>
 </template>
 
@@ -210,6 +219,12 @@ h1 {
   font-weight: 700;
   letter-spacing: -0.05em;
   line-height: 0.95;
+}
+
+.hero-acts {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .add {

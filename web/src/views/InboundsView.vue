@@ -6,6 +6,7 @@ import { api, type InboundItem, type NodeItem } from '../lib/api'
 import InboundFormDrawer from '../components/InboundFormDrawer.vue'
 import ShareModal from '../components/ShareModal.vue'
 import SyncChip from '../components/SyncChip.vue'
+import { hostOf, tagsOf } from '../lib/presets'
 
 const POLL_MS = 5000
 
@@ -122,7 +123,7 @@ function remove(i: InboundItem) {
 
     <div v-else-if="!groups.length" class="empty">
       <p class="empty-big">表单，<br />不是 JSON。</p>
-      <p class="muted">选择服务器，点几下生成 Reality 密钥与 ShortID，保存后主控自动组装配置并下发。</p>
+      <p class="muted">选择协议组合与服务器，密钥、ShortID 与证书一键生成，保存后主控自动组装配置并下发。</p>
       <a-button type="primary" size="large" class="add" @click="create()">
         <Plus :size="17" />
         新建第一个入站
@@ -148,13 +149,11 @@ function remove(i: InboundItem) {
             <div class="main">
               <strong>{{ i.remark || '未命名' }}</strong>
               <span class="tags">
-                <span class="tag">VLESS</span>
-                <span class="tag">Reality</span>
-                <span v-if="i.spec.vless.flow" class="tag">Vision</span>
+                <span v-for="t in tagsOf(i)" :key="t" class="tag">{{ t }}</span>
               </span>
             </div>
             <span class="port mono">:{{ i.port }}</span>
-            <span class="sni mono muted">{{ i.spec.reality.serverNames[0] }}</span>
+            <span class="sni mono muted">{{ hostOf(i) }}</span>
             <div class="acts">
               <a-tooltip title="分享链接 / 二维码">
                 <button type="button" class="ghost" @click="share(i)"><QrCode :size="16" /></button>

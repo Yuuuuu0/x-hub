@@ -5,7 +5,7 @@ import { reactive } from 'vue'
 export const BASE = new URL(document.baseURI).pathname
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public data: any = null) {
     super(message)
   }
 }
@@ -33,7 +33,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   if (!res.ok) {
     if (res.status === 401 && path !== 'login') onUnauthorized()
-    throw new ApiError(res.status, data?.error ?? `请求失败（${res.status}）`)
+    throw new ApiError(res.status, data?.error ?? `请求失败（${res.status}）`, data)
   }
   return data as T
 }
@@ -100,6 +100,7 @@ export interface NodeItem {
   netResetDay: number
   netQuotaBytes: number
   netPeriod: { start: number; rx: number; tx: number }
+  xrayPinnedVersion: string
   runtime: {
     online: boolean
     connectedAt: number
@@ -139,6 +140,7 @@ export interface AllSettings {
   security: SecuritySettings
   subscription: SubscriptionSettings
   stats: StatsSettings
+  certs: { acmeEmail: string; cloudflareTokenSet: boolean }
   selfSignedFingerprint?: string
 }
 
@@ -156,16 +158,18 @@ export const session = reactive({
   username: '',
   version: '',
   publicUrlSet: true,
+  totpEnabled: false,
 })
 
 export async function loadSession() {
-  const s = await api.get<{ authenticated: boolean; username?: string; version: string; publicUrlSet?: boolean }>('session')
+  const s = await api.get<{ authenticated: boolean; username?: string; version: string; publicUrlSet?: boolean; totpEnabled?: boolean }>('session')
   Object.assign(session, {
     loaded: true,
     authenticated: s.authenticated,
     username: s.username ?? '',
     version: s.version,
     publicUrlSet: s.publicUrlSet ?? true,
+    totpEnabled: !!s.totpEnabled,
   })
 }
 
@@ -182,12 +186,32 @@ export interface RealitySpec {
   minClientVer?: string
 }
 
+export interface TLSSpec {
+  serverName: string
+  certMode: 'acme' | 'file'
+  certFile: string
+  keyFile: string
+  alpn: string[]
+  fingerprint: string
+}
+
 export interface InboundSpec {
-  network: 'tcp'
-  security: 'reality'
-  vless: { flow: string }
-  reality: RealitySpec
+  network: 'tcp' | 'ws' | 'xhttp'
+  security: 'reality' | 'tls' | 'none'
+  vless?: { flow: string }
+  reality?: RealitySpec
+  tls?: TLSSpec
+  ws?: { path: string; host: string }
+  xhttp?: { path: string; host: string; mode: string }
+  ss?: { method: string; serverKey: string }
   sniffing: boolean
+}
+
+export interface CertProbe {
+  ok: boolean
+  error?: string
+  names?: string[]
+  notAfter?: number
 }
 
 export interface InboundItem {
@@ -198,7 +222,7 @@ export interface InboundItem {
   enabled: boolean
   listen: string
   port: number
-  protocol: 'vless'
+  protocol: 'vless' | 'vmess' | 'trojan' | 'shadowsocks'
   spec: InboundSpec
   linkHost: string
   linkPort: number

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
-import { Cloud, FileKey, ShieldCheck, Shuffle } from 'lucide-vue-next'
+import { Cloud, Download, FileKey, ShieldCheck, Shuffle } from 'lucide-vue-next'
+import QRCode from 'qrcode'
 import { BASE, api, session, type AccessSettings, type AllSettings, type Release, type TLSMode } from '../lib/api'
 
 // Cloudflare 公布的回源 IP 段（https://www.cloudflare.com/ips/），可能变动，按需更新。
@@ -42,7 +43,10 @@ const namePreview = computed(() =>
 const sessionHours = ref(168)
 const account = reactive({ username: '', currentPassword: '', newPassword: '', confirm: '' })
 
-const saving = reactive({ access: false, xray: false, security: false, account: false, sub: false, stats: false })
+const saving = reactive({ access: false, xray: false, security: false, account: false, sub: false, stats: false, certs: false, totp: false })
+
+const certs = reactive({ acmeEmail: '', cloudflareToken: '', tokenSet: false })
+const totp = reactive({ secret: '', qr: '', code: '', password: '' })
 
 async function load() {
   const s = await api.get<AllSettings>('settings')
@@ -55,6 +59,9 @@ async function load() {
   sessionHours.value = s.security.sessionHours
   Object.assign(subSettings, s.subscription)
   Object.assign(statsSettings, s.stats)
+  certs.acmeEmail = s.certs.acmeEmail
+  certs.tokenSet = s.certs.cloudflareTokenSet
+  certs.cloudflareToken = ''
   account.username = session.username
   loaded.value = true
 }
@@ -86,6 +93,65 @@ function randomString(n: number) {
 
 function randomPath() {
   access.panelPath = randomString(12)
+}
+
+async function saveCerts() {
+  saving.certs = true
+  try {
+    const r = await api.put<{ acmeEmail: string; cloudflareTokenSet: boolean }>('settings/certs', { acmeEmail: certs.acmeEmail, cloudflareToken: certs.cloudflareToken })
+    certs.tokenSet = r.cloudflareTokenSet
+    certs.cloudflareToken = ''
+    message.success('证书设置已保存，需要证书的服务器会重新尝试申请')
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    saving.certs = false
+  }
+}
+
+async function startTotp() {
+  try {
+    const r = await api.post<{ secret: string; uri: string }>('account/totp/setup')
+    totp.secret = r.secret
+    totp.qr = await QRCode.toDataURL(r.uri, { margin: 1, width: 220 })
+    totp.code = ''
+  } catch (e: any) {
+    message.error(e.message)
+  }
+}
+
+async function enableTotp() {
+  saving.totp = true
+  try {
+    await api.post('account/totp/enable', { secret: totp.secret, code: totp.code })
+    session.totpEnabled = true
+    Object.assign(totp, { secret: '', qr: '', code: '' })
+    message.success('两步验证已启用，下次登录需要输入验证码')
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    saving.totp = false
+  }
+}
+
+async function disableTotp() {
+  saving.totp = true
+  try {
+    await api.post('account/totp/disable', { password: totp.password })
+    session.totpEnabled = false
+    totp.password = ''
+    message.success('两步验证已关闭')
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    saving.totp = false
+  }
+}
+
+function downloadBackup() {
+  const a = document.createElement('a')
+  a.href = `${BASE}api/backup`
+  a.click()
 }
 
 async function saveStats() {
@@ -354,6 +420,24 @@ async function saveAccount() {
         </a-form>
       </a-tab-pane>
 
+      <a-tab-pane key="certs" tab="证书">
+        <a-form layout="vertical" class="form" @submit.prevent="saveCerts">
+          <div class="group">
+            <h2>自动申请证书（ACME）</h2>
+            <p class="muted desc">入站选择「自动申请」证书时，被控端使用 Let's Encrypt 与 Cloudflare DNS 验证签发并自动续签证书，无需开放 80 端口。域名需托管在 Cloudflare。</p>
+            <a-form-item label="ACME 邮箱" extra="用于注册 Let's Encrypt 账户与接收证书到期提醒。">
+              <a-input v-model:value="certs.acmeEmail" placeholder="you@example.com" />
+            </a-form-item>
+            <a-form-item label="Cloudflare API Token" extra="在 Cloudflare 创建 API Token，权限选择 Zone → DNS → Edit。Token 会下发给需要证书的服务器。">
+              <a-input-password v-model:value="certs.cloudflareToken" :placeholder="certs.tokenSet ? '已设置，留空保持不变' : '未设置'" autocomplete="off" />
+            </a-form-item>
+          </div>
+          <div class="actions">
+            <a-button type="primary" size="large" html-type="submit" :loading="saving.certs">保存证书设置</a-button>
+          </div>
+        </a-form>
+      </a-tab-pane>
+
       <a-tab-pane key="account" tab="账户与安全">
         <a-form layout="vertical" class="form" @submit.prevent="saveAccount">
           <div class="group">
@@ -375,6 +459,36 @@ async function saveAccount() {
             <a-button type="primary" html-type="submit" :loading="saving.account">更新账户</a-button>
           </div>
         </a-form>
+        <div class="form">
+          <div class="group">
+            <h2>两步验证</h2>
+            <template v-if="session.totpEnabled">
+              <p class="desc"><ShieldCheck :size="15" class="btn-ico ok" />已启用。登录时需要输入验证器 App 中的 6 位验证码。</p>
+              <a-form-item label="当前密码" extra="关闭两步验证需要验证当前密码。">
+                <div class="inline">
+                  <a-input-password v-model:value="totp.password" autocomplete="current-password" />
+                  <a-button danger :loading="saving.totp" @click="disableTotp">关闭两步验证</a-button>
+                </div>
+              </a-form-item>
+            </template>
+            <template v-else-if="totp.secret">
+              <p class="muted desc">用 Google Authenticator、1Password 等验证器 App 扫描二维码，然后输入生成的验证码确认。</p>
+              <div class="totp">
+                <img :src="totp.qr" alt="两步验证二维码" />
+                <div class="totp-side">
+                  <p class="muted small">无法扫码时手动输入密钥：</p>
+                  <a-typography-paragraph :copyable="{ text: totp.secret }" class="mono secret">{{ totp.secret }}</a-typography-paragraph>
+                  <a-input v-model:value="totp.code" class="mono" :maxlength="6" placeholder="6 位验证码" inputmode="numeric" />
+                  <a-button type="primary" :loading="saving.totp" @click="enableTotp">确认启用</a-button>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <p class="muted desc">启用后，登录除密码外还需要验证器 App 生成的动态验证码。忘记时可在主控执行 admin reset 关闭。</p>
+              <a-button @click="startTotp"><ShieldCheck :size="14" class="btn-ico" />启用两步验证</a-button>
+            </template>
+          </div>
+        </div>
         <a-form layout="vertical" class="form" @submit.prevent="saveSecurity">
           <div class="group">
             <h2>会话</h2>
@@ -384,6 +498,24 @@ async function saveAccount() {
             <a-button html-type="submit" :loading="saving.security">保存</a-button>
           </div>
         </a-form>
+      </a-tab-pane>
+
+      <a-tab-pane key="backup" tab="备份">
+        <div class="form">
+          <div class="group">
+            <h2>备份</h2>
+            <p class="muted desc">备份文件包含全部设置、服务器、入站、订阅与流量统计，以及节点凭据与 Reality 私钥，请妥善保管。</p>
+            <a-button type="primary" @click="downloadBackup"><Download :size="14" class="btn-ico" />下载备份</a-button>
+          </div>
+          <div class="group">
+            <h2>恢复</h2>
+            <p class="muted desc">恢复需要在主控机器上执行。把备份文件放入数据目录后：</p>
+            <pre class="mono code">docker compose stop
+docker compose run --rm xhub restore /data/xhub-backup-xxxx.db --data /data
+docker compose up -d</pre>
+            <p class="muted desc">原数据库会保留为 xhub.db.bak-时间戳。被控端凭据随备份一起恢复，无需重新接入。</p>
+          </div>
+        </div>
       </a-tab-pane>
     </a-tabs>
   </section>
@@ -497,6 +629,57 @@ h1 {
   box-shadow: inset 0 0 0 1px var(--lime);
 }
 
+.desc {
+  margin: -6px 0 16px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.ok {
+  color: var(--ok);
+}
+.inline {
+  display: flex;
+  gap: 8px;
+}
+.totp {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+.totp img {
+  width: 180px;
+  height: 180px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 6px;
+}
+.totp-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.small {
+  margin: 0;
+  font-size: 12px;
+}
+.secret {
+  margin: 0 !important;
+  font-size: 12px;
+  word-break: break-all;
+}
+.code {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #d8f7a0;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
 .fp {
   margin: 0 !important;
   font-size: 12px;
