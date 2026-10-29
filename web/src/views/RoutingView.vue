@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Modal, message } from 'ant-design-vue'
-import { Copy, FileDown, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { Copy, CopyPlus, FileDown, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import { api, type ProfileItem, type RuleSetItem } from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { datetime } from '../lib/format'
@@ -80,6 +80,20 @@ async function doImport() {
     message.error(e.message)
   } finally {
     importing.value = false
+  }
+}
+
+/** 复制方案：分组、规则与基础配置原样复制，规则集按名称引用规则集库，不会产生新的规则集。 */
+async function duplicate(p: ProfileItem) {
+  const base = p.name.slice(0, 29)
+  let name = `${base} 副本`
+  for (let i = 2; profiles.value.some((x) => x.name === name); i++) name = `${base} 副本${i}`
+  try {
+    await api.post<ProfileItem>('profiles', { name: name.slice(0, 32), note: p.note, spec: p.spec })
+    message.success(`已复制为「${name}」`)
+    load()
+  } catch (e: any) {
+    message.error(e.message)
   }
 }
 
@@ -163,7 +177,10 @@ const BEHAVIOR: Record<string, string> = { domain: '域名', ipcidr: 'IP 段', c
             </p>
             <footer class="card-acts">
               <a-button size="small" type="primary" @click="router.push({ name: 'profile', params: { id: p.id } })"><Pencil :size="13" class="ico" />编辑</a-button>
-              <a-button size="small" danger class="del" @click="removeProfile(p)"><Trash2 :size="13" /></a-button>
+              <a-tooltip title="复制方案（规则集共用，不会重复创建）">
+                <a-button size="small" class="dup" @click="duplicate(p)"><CopyPlus :size="13" /></a-button>
+              </a-tooltip>
+              <a-button size="small" danger @click="removeProfile(p)"><Trash2 :size="13" /></a-button>
             </footer>
           </article>
         </div>
@@ -325,7 +342,7 @@ h1 {
   display: inline-flex;
   align-items: center;
 }
-.del {
+.dup {
   margin-left: auto;
 }
 .ico {
