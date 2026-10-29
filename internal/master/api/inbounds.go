@@ -14,6 +14,7 @@ import (
 
 	"github.com/Yuuuuu0/x-hub/internal/master/model"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
+	"github.com/Yuuuuu0/x-hub/internal/master/sub"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 )
 
@@ -210,16 +211,7 @@ func (h *Handler) inboundLinks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	target := model.LinkTarget{Host: in.LinkHost, Port: in.LinkPort, Name: node.Name}
-	if target.Host == "" {
-		target.Host = node.PublicHost
-	}
-	if target.Port == 0 {
-		target.Port = in.Port
-	}
-	if in.Remark != "" {
-		target.Name += " " + in.Remark
-	}
+	target := sub.Target(node, in, h.Settings.Subscription().NameTemplate)
 	if target.Host == "" {
 		writeError(w, http.StatusBadRequest, "服务器未设置公网地址，请先编辑服务器或在入站中填写链接地址")
 		return
@@ -235,8 +227,8 @@ func (h *Handler) inboundLinks(w http.ResponseWriter, r *http.Request) {
 		Link             string `json:"link"`
 	}
 	out := make([]link, 0, len(subs))
-	for _, s := range subs {
-		out = append(out, link{s.ID, s.Name, model.ShareLink(spec, target, s.UUID)})
+	for _, sb := range subs {
+		out = append(out, link{sb.ID, sb.Name, model.ShareLink(spec, target, sb.UUID)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"links": out, "enabled": in.Enabled})
 }

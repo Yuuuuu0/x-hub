@@ -38,3 +38,36 @@ func ShareLink(s *Spec, t LinkTarget, uuid string) string {
 	}
 	return u.String()
 }
+
+// MihomoProxy 为 Mihomo（Clash Meta）配置中的一个代理节点，字段顺序即输出顺序。
+type MihomoProxy struct {
+	Name              string       `yaml:"name"`
+	Type              string       `yaml:"type"`
+	Server            string       `yaml:"server"`
+	Port              int          `yaml:"port"`
+	UUID              string       `yaml:"uuid"`
+	Network           string       `yaml:"network"`
+	UDP               bool         `yaml:"udp"`
+	TLS               bool         `yaml:"tls"`
+	Flow              string       `yaml:"flow,omitempty"`
+	ServerName        string       `yaml:"servername"`
+	ClientFingerprint string       `yaml:"client-fingerprint"`
+	RealityOpts       *RealityOpts `yaml:"reality-opts"`
+}
+
+// RealityOpts 为 Mihomo 的 Reality 参数。
+type RealityOpts struct {
+	PublicKey string `yaml:"public-key"`
+	ShortID   string `yaml:"short-id"`
+}
+
+// Mihomo 生成 Mihomo 代理节点。
+func Mihomo(s *Spec, t LinkTarget, uuid string) MihomoProxy {
+	r := s.Reality
+	return MihomoProxy{
+		Name: t.Name, Type: ProtoVLESS, Server: t.Host, Port: t.Port, UUID: uuid,
+		Network: NetworkTCP, UDP: true, TLS: true, Flow: s.VLESS.Flow,
+		ServerName: r.ServerNames[0], ClientFingerprint: r.Fingerprint,
+		RealityOpts: &RealityOpts{PublicKey: r.PublicKey, ShortID: r.ShortIDs[0]},
+	}
+}

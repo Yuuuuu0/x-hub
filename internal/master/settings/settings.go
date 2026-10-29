@@ -21,9 +21,10 @@ const (
 )
 
 const (
-	keyAccess   = "access"
-	keyXray     = "xray"
-	keySecurity = "security"
+	keyAccess       = "access"
+	keyXray         = "xray"
+	keySecurity     = "security"
+	keySubscription = "subscription"
 )
 
 // DefaultListen 为默认监听地址。2096 位于 Cloudflare 支持代理的 HTTPS 端口列表中。
@@ -51,6 +52,16 @@ type Security struct {
 	SessionHours int `json:"sessionHours"`
 }
 
+// Subscription 为订阅输出设置。
+type Subscription struct {
+	Path         string `json:"path"`         // 订阅地址的一级路径，与面板路径分离
+	UpdateHours  int    `json:"updateHours"`  // 建议客户端的自动更新间隔
+	NameTemplate string `json:"nameTemplate"` // 节点名称模板，支持 {node} {remark} {port}
+}
+
+// DefaultNameTemplate 为默认节点名称模板。
+const DefaultNameTemplate = "{node} {remark}"
+
 // Service 为设置的读写入口，读操作走内存缓存。
 type Service struct {
 	store *store.Store
@@ -60,6 +71,7 @@ type Service struct {
 	trusted  []netip.Prefix
 	xray     Xray
 	security Security
+	sub      Subscription
 }
 
 // Load 从数据库加载全部设置，缺失项写入默认值。firstRun 表示访问设置此前不存在。
@@ -84,6 +96,16 @@ func Load(st *store.Store, newPanelPath func() string) (svc *Service, firstRun b
 	if _, err := st.GetSetting(keySecurity, &svc.security); err != nil {
 		return nil, false, err
 	}
+	ok, err = st.GetSetting(keySubscription, &svc.sub)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		svc.sub = Subscription{Path: newPanelPath()[:8], UpdateHours: 12, NameTemplate: DefaultNameTemplate}
+		if err := st.PutSetting(keySubscription, svc.sub); err != nil {
+			return nil, false, err
+		}
+	}
 	return svc, firstRun, nil
 }
 
@@ -107,6 +129,9 @@ func (s *Service) TrustedProxies() []netip.Prefix {
 func (s *Service) SaveAccess(a Access) error {
 	if err := ValidateAccess(&a); err != nil {
 		return err
+	}
+	if a.PanelPath == s.Subscription().Path {
+		return fmt.Errorf("面板路径不能与订阅路径相同")
 	}
 	if err := s.store.PutSetting(keyAccess, a); err != nil {
 		return err
@@ -144,6 +169,38 @@ func (s *Service) SaveXray(x Xray) error {
 	}
 	s.mu.Lock()
 	s.xray = x
+	s.mu.Unlock()
+	return nil
+}
+
+// Subscription 返回订阅设置。
+func (s *Service) Subscription() Subscription {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sub
+}
+
+// SaveSubscription 校验并保存订阅设置。
+func (s *Service) SaveSubscription(sub Subscription) error {
+	sub.Path = strings.Trim(strings.TrimSpace(sub.Path), "/")
+	if !panelPathRe.MatchString(sub.Path) || reservedPaths[sub.Path] {
+		return fmt.Errorf("订阅路径需为 4 到 64 位字母、数字、- 或 _，且不能为保留路径")
+	}
+	if sub.Path == s.Access().PanelPath {
+		return fmt.Errorf("订阅路径不能与面板路径相同")
+	}
+	if sub.UpdateHours < 1 || sub.UpdateHours > 168 {
+		return fmt.Errorf("更新间隔需在 1 到 168 小时之间")
+	}
+	sub.NameTemplate = strings.TrimSpace(sub.NameTemplate)
+	if sub.NameTemplate == "" {
+		sub.NameTemplate = DefaultNameTemplate
+	}
+	if err := s.store.PutSetting(keySubscription, sub); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.sub = sub
 	s.mu.Unlock()
 	return nil
 }

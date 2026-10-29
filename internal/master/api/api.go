@@ -70,6 +70,8 @@ func (h *Handler) Init() {
 	m.HandleFunc("PUT /api/subscriptions/{id}", h.authed(h.updateSubscription))
 	m.HandleFunc("DELETE /api/subscriptions/{id}", h.authed(h.deleteSubscription))
 	m.HandleFunc("POST /api/subscriptions/{id}/reset-credentials", h.authed(h.resetSubscriptionCredentials))
+	m.HandleFunc("POST /api/subscriptions/{id}/reset-token", h.authed(h.resetSubscriptionToken))
+	m.HandleFunc("PUT /api/settings/subscription", h.authed(h.putSubscriptionSettings))
 	m.HandleFunc("POST /api/tools/x25519", h.authed(h.x25519))
 	m.HandleFunc("GET /api/tools/short-id", h.authed(h.shortID))
 	m.HandleFunc("GET /api/xray/releases", h.authed(h.xrayReleases))
@@ -89,11 +91,15 @@ func (h *Handler) Init() {
 	h.agentMux = a
 }
 
-// ServeHTTP 按路径前缀分发：/agent/ 为被控端接口，/{面板路径}/ 为面板，其余一律 404。
+// ServeHTTP 按路径前缀分发：/agent/ 为被控端接口，/{订阅路径}/ 为订阅，/{面板路径}/ 为面板，其余一律 404。
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	if strings.HasPrefix(p, "/agent/") {
 		h.agentMux.ServeHTTP(w, r)
+		return
+	}
+	if rest, ok := strings.CutPrefix(p, "/"+h.Settings.Subscription().Path+"/"); ok {
+		h.serveSubscription(w, r, rest)
 		return
 	}
 	panel := "/" + h.Settings.Access().PanelPath

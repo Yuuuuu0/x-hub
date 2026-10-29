@@ -11,9 +11,10 @@ import (
 
 func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
-		"access":   h.Settings.Access(),
-		"xray":     h.Settings.Xray(),
-		"security": h.Settings.Security(),
+		"access":       h.Settings.Access(),
+		"xray":         h.Settings.Xray(),
+		"security":     h.Settings.Security(),
+		"subscription": h.Settings.Subscription(),
 	}
 	if fp, err := h.Certs.SelfSigned(); err == nil {
 		out["selfSignedFingerprint"] = fp
@@ -95,4 +96,17 @@ func (h *Handler) putSecurity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.Settings.Security())
+}
+
+func (h *Handler) putSubscriptionSettings(w http.ResponseWriter, r *http.Request) {
+	var s settings.Subscription
+	if err := readJSON(r, &s); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.Settings.SaveSubscription(s); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, h.Settings.Subscription())
 }

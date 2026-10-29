@@ -25,18 +25,83 @@ type Subscription struct {
 	Enabled     bool   `json:"enabled"`
 	State       string `json:"state"`
 	AllInbounds bool   `json:"allInbounds"`
+	LimitBytes  int64  `json:"limitBytes"`
+	ExpireAt    int64  `json:"expireAt"`
+	UsedUp      int64  `json:"usedUp"`
+	UsedDown    int64  `json:"usedDown"`
 	CreatedAt   int64  `json:"createdAt"`
 }
 
 // Active 表示订阅当前是否应下发到节点。
 func (s *Subscription) Active() bool { return s.Enabled && s.State == SubActive }
 
-const subColumns = `id, name, note, sort, token, secret, uuid, enabled, state, all_inbounds, created_at`
+const subColumns = `id, name, note, sort, token, secret, uuid, enabled, state, all_inbounds, limit_bytes, expire_at,
+	used_up, used_down, created_at`
 
 func scanSub(r rowScanner) (*Subscription, error) {
 	var s Subscription
-	err := r.Scan(&s.ID, &s.Name, &s.Note, &s.Sort, &s.Token, &s.Secret, &s.UUID, &s.Enabled, &s.State, &s.AllInbounds, &s.CreatedAt)
+	err := r.Scan(&s.ID, &s.Name, &s.Note, &s.Sort, &s.Token, &s.Secret, &s.UUID, &s.Enabled, &s.State, &s.AllInbounds,
+		&s.LimitBytes, &s.ExpireAt, &s.UsedUp, &s.UsedDown, &s.CreatedAt)
 	return &s, err
+}
+
+// SubscriptionByToken 按订阅链接令牌查询。
+func (s *Store) SubscriptionByToken(token string) (*Subscription, error) {
+	sub, err := scanSub(s.db.QueryRow("SELECT "+subColumns+" FROM subscriptions WHERE token = ?", token))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return sub, err
+}
+
+// ResetSubscriptionToken 更换订阅链接令牌，旧链接随之失效，凭据不变。
+func (s *Store) ResetSubscriptionToken(id int64, token string) error {
+	return s.execOne("UPDATE subscriptions SET token = ? WHERE id = ?", token, id)
+}
+
+// SubscriptionInboundIDs 返回各订阅被单独授权的入站 ID。
+func (s *Store) SubscriptionInboundIDs() (map[int64][]int64, error) {
+	rows, err := s.db.Query("SELECT sub_id, inbound_id FROM subscription_inbounds ORDER BY sub_id, inbound_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]int64{}
+	for rows.Next() {
+		var sid, iid int64
+		if err := rows.Scan(&sid, &iid); err != nil {
+			return nil, err
+		}
+		out[sid] = append(out[sid], iid)
+	}
+	return out, rows.Err()
+}
+
+// SetSubscriptionScope 设置订阅的入站范围：覆盖全部入站，或仅限 inboundIDs。
+func (s *Store) SetSubscriptionScope(id int64, all bool, inboundIDs []int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec("UPDATE subscriptions SET all_inbounds = ? WHERE id = ?", all, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec("DELETE FROM subscription_inbounds WHERE sub_id = ?", id); err != nil {
+		return err
+	}
+	if !all {
+		for _, iid := range inboundIDs {
+			if _, err := tx.Exec("INSERT OR IGNORE INTO subscription_inbounds (sub_id, inbound_id) SELECT ?, id FROM inbounds WHERE id = ?", id, iid); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 // ListSubscriptions 返回全部订阅。
