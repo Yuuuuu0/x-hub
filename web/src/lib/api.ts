@@ -312,6 +312,8 @@ export interface ProfileSpec {
   groups: RouteGroup[]
   rules: RouteRule[]
   mihomo: { base: string }
+  singbox: { base: string }
+  shadowrocket: { base: string }
 }
 
 export interface ProfileItem {

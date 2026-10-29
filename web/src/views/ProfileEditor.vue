@@ -18,7 +18,13 @@ const loaded = ref(false)
 const tab = ref('groups')
 const name = ref('')
 const note = ref('')
-const spec = reactive<ProfileSpec>({ groups: [], rules: [], mihomo: { base: '' } })
+const spec = reactive<ProfileSpec>({ groups: [], rules: [], mihomo: { base: '' }, singbox: { base: '' }, shadowrocket: { base: '' } })
+const client = ref<'mihomo' | 'singbox' | 'shadowrocket'>('mihomo')
+const CLIENTS = [
+  { value: 'mihomo', label: 'Mihomo' },
+  { value: 'singbox', label: 'sing-box' },
+  { value: 'shadowrocket', label: 'Shadowrocket' },
+]
 const snapshot = ref('')
 const saving = ref(false)
 const issues = ref<string[]>([])
@@ -26,7 +32,7 @@ const issues = ref<string[]>([])
 const ruleSets = ref<RuleSetItem[]>([])
 const subs = ref<Subscription[]>([])
 
-const preview = reactive({ subId: undefined as number | undefined, loading: false, mihomo: '', warnings: [] as string[], issues: [] as string[], nodes: [] as PreviewNode[] })
+const preview = reactive({ subId: undefined as number | undefined, loading: false, config: '', warnings: [] as string[], issues: [] as string[], nodes: [] as PreviewNode[] })
 
 const current = () => JSON.stringify({ name: name.value, note: note.value, spec })
 const dirty = computed(() => loaded.value && current() !== snapshot.value)
@@ -40,7 +46,13 @@ async function load() {
     ])
     name.value = p.name
     note.value = p.note
-    Object.assign(spec, { groups: p.spec.groups ?? [], rules: p.spec.rules ?? [], mihomo: { base: p.spec.mihomo?.base ?? '' } })
+    Object.assign(spec, {
+      groups: p.spec.groups ?? [],
+      rules: p.spec.rules ?? [],
+      mihomo: { base: p.spec.mihomo?.base ?? '' },
+      singbox: { base: p.spec.singbox?.base ?? '' },
+      shadowrocket: { base: p.spec.shadowrocket?.base ?? '' },
+    })
     ruleSets.value = a.ruleSets
     subs.value = b.subscriptions
     preview.subId = (subs.value.find((s) => s.profileId === id) ?? subs.value[0])?.id
@@ -78,13 +90,17 @@ async function runPreview() {
   if (!preview.subId) return
   preview.loading = true
   try {
-    const r = await api.post<{ mihomo: string; warnings: string[]; issues: string[]; nodes?: PreviewNode[] }>('profiles/preview', { subscriptionId: preview.subId, spec })
-    preview.mihomo = r.mihomo
+    const r = await api.post<{ config: string; warnings: string[]; issues: string[]; nodes?: PreviewNode[] }>('profiles/preview', {
+      subscriptionId: preview.subId,
+      client: client.value,
+      spec,
+    })
+    preview.config = r.config
     preview.warnings = r.warnings
     preview.issues = r.issues
     if (r.nodes) preview.nodes = r.nodes
   } catch (e: any) {
-    preview.mihomo = ''
+    preview.config = ''
     preview.warnings = []
     preview.issues = [e.message]
   } finally {
@@ -93,6 +109,16 @@ async function runPreview() {
 }
 
 watch(tab, (t) => t === 'preview' && runPreview())
+watch(client, () => tab.value === 'preview' && runPreview())
+
+/** 以默认模板填充当前客户端（sing-box / Shadowrocket）的基础配置。 */
+async function fillDefault() {
+  const d = await api.get<{ singbox: string; shadowrocket: string }>('profiles/defaults')
+  if (client.value === 'singbox') spec.singbox.base = d.singbox
+  else if (client.value === 'shadowrocket') spec.shadowrocket.base = d.shadowrocket
+}
+
+const LANG = { mihomo: 'yaml', singbox: 'json', shadowrocket: 'text' } as const
 
 function onKey(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -259,7 +285,7 @@ const VALUE_HINT: Record<string, string> = {
 const showSet = ref(false)
 
 async function copyPreview() {
-  if (await copyText(preview.mihomo)) message.success('已复制')
+  if (await copyText(preview.config)) message.success('已复制')
 }
 </script>
 
@@ -409,10 +435,26 @@ async function copyPreview() {
         </a-tab-pane>
 
         <a-tab-pane key="base" tab="基础配置">
-          <p class="muted hint">
-            Mihomo 的端口、DNS、TUN、嗅探等设置。proxies、proxy-groups、rule-providers 与 rules 由方案生成，不要写在这里。
-          </p>
-          <CodeEditor v-model="spec.mihomo.base" min-height="560px" />
+          <div class="toolbar">
+            <a-segmented v-model:value="client" :options="CLIENTS" />
+            <a-button v-if="client !== 'mihomo'" class="btn" @click="fillDefault">填入默认模板</a-button>
+          </div>
+          <template v-if="client === 'mihomo'">
+            <p class="muted hint">端口、DNS、TUN、嗅探等设置。proxies、proxy-groups、rule-providers 与 rules 由方案生成，不要写在这里。</p>
+            <CodeEditor v-model="spec.mihomo.base" min-height="560px" />
+          </template>
+          <template v-else-if="client === 'shadowrocket'">
+            <p class="muted hint">
+              [General] 等段落（DNS、跳过代理、URL 重写、MITM 等）。[Proxy Group] 与 [Rule] 由方案生成；节点不写入配置，由同一订阅的通用链接导入。留空时使用默认模板。
+            </p>
+            <CodeEditor v-model="spec.shadowrocket.base" lang="text" min-height="560px" />
+          </template>
+          <template v-else>
+            <p class="muted hint">
+              JSON 格式（1.12+）。outbounds、route.rule_set 与 route.final 由方案生成；route.rules 中的规则会排在方案规则之前，适合放 sniff、hijack-dns。留空时使用默认模板。
+            </p>
+            <CodeEditor v-model="spec.singbox.base" lang="json" min-height="560px" />
+          </template>
         </a-tab-pane>
 
         <a-tab-pane key="preview" tab="预览">
@@ -426,9 +468,10 @@ async function copyPreview() {
                 not-found-content="还没有订阅"
                 @change="runPreview"
               />
+              <a-segmented v-model:value="client" :options="CLIENTS" />
               <a-button class="btn" :loading="preview.loading" @click="runPreview"><RefreshCw :size="15" />刷新</a-button>
             </div>
-            <a-button class="btn" :disabled="!preview.mihomo" @click="copyPreview"><Copy :size="15" />复制</a-button>
+            <a-button class="btn" :disabled="!preview.config" @click="copyPreview"><Copy :size="15" />复制</a-button>
           </div>
           <p class="muted hint">按所选订阅可用的节点生成，包含尚未保存的修改。</p>
           <a-alert v-if="preview.issues.length" type="error" show-icon class="issues">
@@ -446,7 +489,7 @@ async function copyPreview() {
             </template>
           </a-alert>
           <a-empty v-if="!subs.length" description="先创建一个订阅才能预览" />
-          <CodeEditor v-else-if="preview.mihomo" :model-value="preview.mihomo" readonly min-height="560px" />
+          <CodeEditor v-else-if="preview.config" :model-value="preview.config" :lang="LANG[client]" readonly min-height="560px" />
         </a-tab-pane>
       </a-tabs>
     </template>

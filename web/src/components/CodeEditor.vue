@@ -3,14 +3,17 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState, Compartment } from '@codemirror/state'
 import { yaml } from '@codemirror/lang-yaml'
+import { json } from '@codemirror/lang-json'
 
-// 代码编辑器（YAML），配色取自页面设计令牌，随明暗主题切换。
-const props = defineProps<{ readonly?: boolean; minHeight?: string }>()
+// 代码编辑器（YAML / JSON / 纯文本），配色取自页面设计令牌，随明暗主题切换。
+const props = defineProps<{ readonly?: boolean; minHeight?: string; lang?: 'yaml' | 'json' | 'text' }>()
 const model = defineModel<string>({ required: true })
 
 const host = ref<HTMLElement>()
 let view: EditorView | undefined
 const editable = new Compartment()
+const language = new Compartment()
+const langOf = (l?: string) => (l === 'json' ? json() : l === 'text' ? [] : yaml())
 
 const theme = EditorView.theme({
   '&': { fontSize: '12.5px', backgroundColor: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '10px' },
@@ -29,7 +32,7 @@ onMounted(() => {
       doc: model.value,
       extensions: [
         basicSetup,
-        yaml(),
+        language.of(langOf(props.lang)),
         theme,
         editable.of([EditorState.readOnly.of(!!props.readonly), EditorView.editable.of(!props.readonly)]),
         EditorView.updateListener.of((u) => {
@@ -49,6 +52,11 @@ watch(model, (v) => {
 watch(
   () => props.readonly,
   (ro) => view?.dispatch({ effects: editable.reconfigure([EditorState.readOnly.of(!!ro), EditorView.editable.of(!ro)]) }),
+)
+
+watch(
+  () => props.lang,
+  (l) => view?.dispatch({ effects: language.reconfigure(langOf(l)) }),
 )
 
 onBeforeUnmount(() => view?.destroy())

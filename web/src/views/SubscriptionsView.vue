@@ -279,7 +279,7 @@ function remove(s: Subscription) {
         <a-form-item label="到期时间" extra="留空表示永不到期；到期后自动停用。">
           <a-date-picker v-model:value="form.expire" show-time value-format="X" format="YYYY-MM-DD HH:mm" class="full" placeholder="永不到期" />
         </a-form-item>
-        <a-form-item label="分流方案" extra="决定 Clash 系客户端拿到的分组与规则，可在「分流」中管理。">
+        <a-form-item label="分流方案" extra="决定 Clash 系、sing-box 与 Shadowrocket 客户端拿到的分组与规则，可在「分流」中管理。">
           <a-select v-model:value="form.profileId" :options="profileOptions" />
         </a-form-item>
       </a-form>

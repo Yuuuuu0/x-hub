@@ -144,7 +144,7 @@ const BEHAVIOR: Record<string, string> = { domain: '域名', ipcidr: 'IP 段', c
         <a-button v-else type="primary" size="large" class="btn" @click="editSet(null)"><Plus :size="17" />新建规则集</a-button>
       </div>
     </header>
-    <p class="lead muted">分流方案决定 Clash 系客户端拿到的分组与规则，每个订阅可以选用不同的方案；规则集可在多个方案间复用。</p>
+    <p class="lead muted">分流方案决定 Clash 系、sing-box 与 Shadowrocket 客户端拿到的分组与规则，每个订阅可以选用不同的方案；规则集可在多个方案间复用。</p>
 
     <a-tabs v-model:activeKey="tab">
       <a-tab-pane key="profiles" tab="方案">
