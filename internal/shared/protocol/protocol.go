@@ -12,6 +12,14 @@ const (
 	TypeEndpoint  = "endpoint"  // M→A 主控访问地址变更通知
 	TypeXray      = "xray"      // M→A Xray 进程控制
 	TypeLogs      = "logs"      // M→A 读取 Xray 最近日志
+	TypeApply     = "apply"     // M→A 下发完整 Xray 配置
+	TypeProbe     = "probe"     // M→A 在被控端本机执行探测
+)
+
+// 探测类型。
+const (
+	ProbeRealityTarget = "reality_target" // 检测 Reality 目标网站是否支持 TLS 1.3 / H2
+	ProbePort          = "port"           // 检测端口是否可用
 )
 
 // Xray 控制动作。
@@ -64,12 +72,51 @@ type XrayStatus struct {
 	LastError string `json:"lastError,omitempty"`
 }
 
-// Hello 为被控端连接后上报的身份与状态。
+// Hello 为被控端连接后上报的身份与状态。AppliedRev / AppliedHash 为本地已应用的配置版本。
 type Hello struct {
 	AgentVersion string     `json:"agentVersion"`
 	Host         HostInfo   `json:"host"`
 	Xray         XrayStatus `json:"xray"`
 	Caps         []string   `json:"caps"`
+	AppliedRev   int64      `json:"appliedRev"`
+	AppliedHash  string     `json:"appliedHash"`
+}
+
+// Apply 为主控下发的完整 Xray 配置（不含被控端自管的 api / stats / policy 段）。
+// 被控端忽略 Rev 小于已应用版本的配置。
+type Apply struct {
+	Rev    int64           `json:"rev"`
+	Hash   string          `json:"hash"`
+	Config json.RawMessage `json:"config"`
+}
+
+// ApplyResult 为配置应用结果。
+type ApplyResult struct {
+	Rev  int64  `json:"rev"`
+	Hash string `json:"hash"`
+}
+
+// ProbeRequest 为探测请求。
+type ProbeRequest struct {
+	Kind       string `json:"kind"`
+	Target     string `json:"target,omitempty"`     // reality_target：域名:端口
+	ServerName string `json:"serverName,omitempty"` // reality_target：握手使用的 SNI
+	Port       int    `json:"port,omitempty"`       // port
+}
+
+// ProbeTargetResult 为 Reality 目标网站探测结果。
+type ProbeTargetResult struct {
+	OK        bool   `json:"ok"`
+	TLS13     bool   `json:"tls13"`
+	H2        bool   `json:"h2"`
+	LatencyMs int64  `json:"latencyMs"`
+	Error     string `json:"error,omitempty"`
+}
+
+// ProbePortResult 为端口探测结果。Owned 表示端口由当前 Xray 配置中的入站占用。
+type ProbePortResult struct {
+	Free  bool `json:"free"`
+	Owned bool `json:"owned"`
 }
 
 // Welcome 为主控对 Hello 的应答。

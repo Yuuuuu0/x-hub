@@ -18,6 +18,7 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/server"
 	"github.com/Yuuuuu0/x-hub/internal/master/settings"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
+	"github.com/Yuuuuu0/x-hub/internal/master/syncer"
 	"github.com/Yuuuuu0/x-hub/internal/master/xrayrel"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 )
@@ -29,6 +30,7 @@ type Handler struct {
 	Certs         *server.Certs
 	Server        *server.Server
 	Hub           *hub.Hub
+	Syncer        *syncer.Syncer
 	Releases      *xrayrel.Service
 	Log           *slog.Logger
 	Web           fs.FS  // 前端构建产物根目录
@@ -56,6 +58,20 @@ func (h *Handler) Init() {
 	m.HandleFunc("POST /api/nodes/{id}/install-command", h.authed(h.installCommand))
 	m.HandleFunc("POST /api/nodes/{id}/xray", h.authed(h.xrayAction))
 	m.HandleFunc("GET /api/nodes/{id}/logs", h.authed(h.nodeLogs))
+	m.HandleFunc("POST /api/nodes/{id}/probe", h.authed(h.probeNode))
+	m.HandleFunc("POST /api/nodes/{id}/sync", h.authed(h.syncNode))
+	m.HandleFunc("GET /api/inbounds", h.authed(h.listInbounds))
+	m.HandleFunc("POST /api/inbounds", h.authed(h.createInbound))
+	m.HandleFunc("PUT /api/inbounds/{id}", h.authed(h.updateInbound))
+	m.HandleFunc("DELETE /api/inbounds/{id}", h.authed(h.deleteInbound))
+	m.HandleFunc("GET /api/inbounds/{id}/links", h.authed(h.inboundLinks))
+	m.HandleFunc("GET /api/subscriptions", h.authed(h.listSubscriptions))
+	m.HandleFunc("POST /api/subscriptions", h.authed(h.createSubscription))
+	m.HandleFunc("PUT /api/subscriptions/{id}", h.authed(h.updateSubscription))
+	m.HandleFunc("DELETE /api/subscriptions/{id}", h.authed(h.deleteSubscription))
+	m.HandleFunc("POST /api/subscriptions/{id}/reset-credentials", h.authed(h.resetSubscriptionCredentials))
+	m.HandleFunc("POST /api/tools/x25519", h.authed(h.x25519))
+	m.HandleFunc("GET /api/tools/short-id", h.authed(h.shortID))
 	m.HandleFunc("GET /api/xray/releases", h.authed(h.xrayReleases))
 	m.HandleFunc("GET /api/settings", h.authed(h.getSettings))
 	m.HandleFunc("PUT /api/settings/access", h.authed(h.putAccess))
@@ -111,8 +127,9 @@ func (h *Handler) Endpoint() protocol.Endpoint {
 	return ep
 }
 
-// OnAgentHello 在被控端握手后调用：未安装 Xray 时自动安装默认版本。
+// OnAgentHello 在被控端握手后调用：校验配置是否需要同步；未安装 Xray 时自动安装默认版本。
 func (h *Handler) OnAgentHello(nodeID int64, hello protocol.Hello) {
+	h.Syncer.OnHello(nodeID, hello)
 	if hello.Xray.Installed || !xrayrel.SupportedArch(hello.Host.Arch) {
 		return
 	}

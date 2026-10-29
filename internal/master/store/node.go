@@ -24,6 +24,10 @@ type Node struct {
 	LastIP       string            `json:"lastIp"`
 	LastSeenAt   int64             `json:"lastSeenAt"`
 	CreatedAt    int64             `json:"createdAt"`
+	DesiredRev   int64             `json:"desiredRev"`
+	AppliedRev   int64             `json:"appliedRev"`
+	AppliedHash  string            `json:"appliedHash"`
+	SyncError    string            `json:"syncError"`
 
 	secretHash string
 }
@@ -32,7 +36,7 @@ type Node struct {
 func (n *Node) SecretHash() string { return n.secretHash }
 
 const nodeColumns = `id, name, remark, sort, public_host, secret_hash, agent_version, xray_version,
-	capabilities_json, host_info_json, last_ip, last_seen_at, created_at`
+	capabilities_json, host_info_json, last_ip, last_seen_at, created_at, desired_rev, applied_rev, applied_hash, sync_error`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -40,7 +44,8 @@ func scanNode(r rowScanner) (*Node, error) {
 	var n Node
 	var caps, host string
 	if err := r.Scan(&n.ID, &n.Name, &n.Remark, &n.Sort, &n.PublicHost, &n.secretHash, &n.AgentVersion,
-		&n.XrayVersion, &caps, &host, &n.LastIP, &n.LastSeenAt, &n.CreatedAt); err != nil {
+		&n.XrayVersion, &caps, &host, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.DesiredRev, &n.AppliedRev,
+		&n.AppliedHash, &n.SyncError); err != nil {
 		return nil, err
 	}
 	n.Enrolled = n.secretHash != ""
@@ -120,6 +125,30 @@ func (s *Store) UpdateNodeXray(id int64, xrayVersion string, caps []string) erro
 // TouchNode 刷新最后在线时间。
 func (s *Store) TouchNode(id int64) error {
 	_, err := s.db.Exec("UPDATE nodes SET last_seen_at = ? WHERE id = ?", time.Now().Unix(), id)
+	return err
+}
+
+// NextDesiredRev 递增并返回服务器的期望配置版本号。
+func (s *Store) NextDesiredRev(id int64) (int64, error) {
+	var rev int64
+	err := s.db.QueryRow("UPDATE nodes SET desired_rev = desired_rev + 1 WHERE id = ? RETURNING desired_rev", id).Scan(&rev)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	return rev, err
+}
+
+// SetNodeApplied 记录被控端已应用的配置版本与哈希，并清除同步错误。
+// 期望版本号至少追平已应用版本，避免主控数据回退后下发的版本被被控端当作过期配置忽略。
+func (s *Store) SetNodeApplied(id, rev int64, hash string) error {
+	_, err := s.db.Exec(`UPDATE nodes SET applied_rev = ?, applied_hash = ?, sync_error = '',
+		desired_rev = MAX(desired_rev, ?) WHERE id = ?`, rev, hash, rev, id)
+	return err
+}
+
+// SetNodeSyncError 记录最近一次下发失败的原因。
+func (s *Store) SetNodeSyncError(id int64, msg string) error {
+	_, err := s.db.Exec("UPDATE nodes SET sync_error = ? WHERE id = ?", msg, id)
 	return err
 }
 

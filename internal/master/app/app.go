@@ -20,6 +20,7 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/server"
 	"github.com/Yuuuuu0/x-hub/internal/master/settings"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
+	"github.com/Yuuuuu0/x-hub/internal/master/syncer"
 	"github.com/Yuuuuu0/x-hub/internal/master/xrayrel"
 	"github.com/Yuuuuu0/x-hub/internal/version"
 	"github.com/Yuuuuu0/x-hub/web"
@@ -59,6 +60,11 @@ func Run(opts Options) error {
 	if err != nil {
 		return err
 	}
+	if password != "" { // 首次启动：为个人自用预置一个订阅
+		if _, err := api.CreateSubscription(st, "自己", ""); err != nil {
+			return err
+		}
+	}
 
 	certs := server.NewCerts(filepath.Join(opts.DataDir, "tls"), cfg)
 	if cfg.Access().TLSMode == settings.TLSSelfSigned {
@@ -78,13 +84,14 @@ func Run(opts Options) error {
 		InstallScript: deploy.InstallScript,
 	}
 	h.Hub = hub.New(st, log, h.Endpoint, h.OnAgentHello)
+	h.Syncer = syncer.New(st, h.Hub, log)
 	h.Init()
 	h.Server = server.New(cfg, certs, h, log)
 	if err := h.Server.Start(); err != nil {
 		return fmt.Errorf("监听 %s 失败：%w（可执行 settings reset-access 恢复默认访问配置）", cfg.Access().Listen, err)
 	}
 	printBanner(cfg.Access(), password)
-
+	h.Syncer.TriggerAll() // 预先编译各服务器期望配置，用于同步状态展示
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go cleanupLoop(ctx, st, log)

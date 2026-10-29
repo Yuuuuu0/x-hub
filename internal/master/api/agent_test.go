@@ -20,6 +20,7 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/server"
 	"github.com/Yuuuuu0/x-hub/internal/master/settings"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
+	"github.com/Yuuuuu0/x-hub/internal/master/syncer"
 	"github.com/Yuuuuu0/x-hub/internal/master/xrayrel"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 )
@@ -46,6 +47,7 @@ func newTestHandler(t *testing.T) *Handler {
 		Web:      fs.FS(fstest.MapFS{"index.html": {Data: []byte(`<base href="/">`)}}),
 	}
 	h.Hub = hub.New(st, log, h.Endpoint, nil)
+	h.Syncer = syncer.New(st, h.Hub, log)
 	h.Init()
 	return h
 }

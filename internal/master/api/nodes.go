@@ -20,10 +20,11 @@ import (
 
 const enrollTokenTTL = time.Hour
 
-// nodeView 为服务器列表项：持久化字段 + 内存运行时状态。
+// nodeView 为服务器列表项：持久化字段 + 内存运行时状态 + 配置同步状态。
 type nodeView struct {
 	*store.Node
-	Runtime hub.RuntimeState `json:"runtime"`
+	Runtime   hub.RuntimeState `json:"runtime"`
+	SyncState string           `json:"syncState"`
 }
 
 func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +35,7 @@ func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]nodeView, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, nodeView{Node: n, Runtime: h.Hub.State(n.ID)})
+		out = append(out, nodeView{Node: n, Runtime: h.Hub.State(n.ID), SyncState: h.Syncer.State(n)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": out, "masterVersion": version.Version})
 }
@@ -113,6 +114,7 @@ func (h *Handler) deleteNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Hub.Kick(id)
+	h.Syncer.Forget(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
