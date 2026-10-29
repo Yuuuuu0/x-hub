@@ -108,7 +108,6 @@ Agent                                          Master
 | `heartbeat` | A→M | cpu/mem/disk/load/uptime、网卡累计计数、xray 状态、在线快照 |
 | `traffic` | A→M | `seq`、`hour`、`items[{email, up, down}]`、`nic{rx, tx}` |
 | `apply` | M→A | `rev` + 完整配置；Agent 串行处理，`rev ≤ applied` 忽略 |
-| `users` | M→A | `rev` + `add[]/remove[]`，gRPC 增删用户不重启，并同步本地配置文件 |
 | `endpoint` | M→A | 主控推荐地址变更 `{url, fp}` |
 | `xray` | M→A | `start/stop/restart/install{version}`；安装包经主控中转，摘要通过 `X-Content-Sha256` 响应头下发 |
 | `probe` | M→A | `reality_dest{host}`、`port_free{port}` |
@@ -127,7 +126,7 @@ Agent：xray -test 校验 → 原子写盘 → 应用 → 回报 applied_rev/has
 
 | 变更 | 应用方式 |
 |---|---|
-| 订阅增减、超额、到期、停用 | `users` 消息 → gRPC `AlterInbound`，不重启 |
+| 订阅增减、超额、到期、停用、范围调整 | 主控照常下发完整配置；被控端比对上次应用的配置，仅 `clients` 变化时经 gRPC `AlterInbound` 在线增删用户，不重启（失败回退为重启） |
 | 入站参数（端口、SNI、密钥等） | 重启 Xray（仅影响该服务器） |
 | 路由 / 出站 / 全局设置 | 重启 Xray |
 
@@ -162,7 +161,7 @@ Inbound
 - 保存前由 Agent 检查端口占用。
 - 全局 Xray 行为（屏蔽 BT、屏蔽私有 IP、IPv4/IPv6 优先、DNS）以开关呈现。
 - 较新的协议特性默认关闭并标注"部分客户端不支持"，默认产物保证主流客户端（含 Shadowrocket）可用。
-- Xray v26.3.27 之后的版本在 `minClientVer` 留空时默认拒绝低于 26.3.27 的客户端，表单在「高级」中提供该字段，供第三方客户端无法连接时调低。
+- Xray v26.3.27 之后的版本在 `minClientVer` 留空时默认拒绝低于 26.3.27 的客户端。第三方 Reality 客户端上报的版本很低（Mihomo 源码固定为 1.8.2，已实测被拒），因此表单提供「兼容第三方客户端」开关，新建入站默认开启（`minClientVer = 1.8.0`），只用 Xray 内核客户端时可关闭以遵循 Xray 默认值。
 - 默认目标为 `dl.google.com:443`；快选列表不含 Xray 告警的 apple / icloud / microsoft 类域名（实测 `www.microsoft.com` 在部分网络下 Reality 握手失败），命中告警规则时表单给出提示。
 
 ## 7. 订阅与凭据
@@ -174,10 +173,12 @@ Inbound
   - SS2022：`HKDF(secret, inbound_id)`，按 method 截取所需长度
 - Xray client email 统一为 `s{subId}.i{inboundId}`，统计天然细到"订阅 × 入站"。
 - 入站生效 clients = `enabled 且 state=active 的订阅` ∩ `(all_inbounds 或 在授权表中)`。
-- 订阅地址：`<public_url>/<sub_path>/{token}`，`sub_path` 可在设置中修改，默认与面板路径不同。
+- 订阅地址：`<public_url>/<sub_path>/{token}`，`sub_path` 首次启动随机生成、可在设置中修改，且不能与面板路径相同；令牌无效或订阅停用时一律 404。
+- 订阅链接令牌可单独重置（旧链接失效、已导入节点不受影响）；凭据重置则使已导入节点失效。
+- 节点名称按模板生成（`{node}` `{remark}` `{port}`），重名自动追加序号。
   - 按 User-Agent 自动选择格式，`?format=` 可强制。
   - 返回 `subscription-userinfo`、`profile-update-interval`、`content-disposition` 头。
-  - Mihomo 使用内置精简模板（select + url-test + 基础规则）。
+  - Mihomo 使用内置精简模板（select + url-test + 基础规则），已用 Mihomo v1.19.33 校验配置并实际连通。
 
 ## 8. 流量统计与额度
 
