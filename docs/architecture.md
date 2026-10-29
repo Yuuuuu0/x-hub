@@ -146,13 +146,19 @@ Inbound
   └─ ToSingbox(cred)         sing-box outbound
 ```
 
-**v1 协议范围**
+**v1 协议范围**（均已用 Mihomo v1.19.33 实际连通，除 XHTTP 外均已用 sing-box v1.14.4 连通）
 
 - VLESS + TCP + Reality + Vision
-- VLESS + XHTTP + Reality
-- VLESS / VMess + WS + TLS
+- VLESS + XHTTP + Reality（sing-box 不支持 XHTTP，sing-box 订阅不输出该类节点）
+- VLESS / VMess + WS + TLS（Xray 已将 VMess 标记为弃用，表单中注明）
 - Trojan + TLS
-- Shadowsocks 2022
+- Shadowsocks 2022（Xray 多用户仅支持 `2022-blake3-aes-128-gcm` / `256-gcm`）
+
+**节点证书**（TLS 类入站）
+
+- 证书文件：填写节点上已有证书的绝对路径；保存时被控端以 xhub 用户实际读取并校验，返回域名与到期时间。Xray 默认每 3600 秒重新读取证书文件，续签后无需重启。
+- 自动申请：被控端内置 lego，以 Let's Encrypt + Cloudflare DNS-01 签发并每 12 小时检查续签（剩余不足 30 天）。ACME 邮箱与 Cloudflare Token 存于主控「设置 → 证书」，随 `apply` 下发给需要证书的节点；证书写入被控端数据目录 `certs/<域名>/`，主控编译的配置以相对路径引用。
+- 申请失败不阻塞整台服务器：被控端跳过缺少证书的入站，其余配置照常生效，但不记录为已应用版本，主控显示失败原因，下次同步时重试。
 
 **辅助能力**
 
@@ -169,14 +175,17 @@ Inbound
 - 订阅链接 `token` 与连接凭据 `secret` 分离：重置链接不影响凭据，轮换凭据不改链接。
 - 凭据由 `secret` 确定性派生，无需"订阅×入站"凭据表：
   - VLESS / VMess：订阅 `uuid`
-  - Trojan：`HMAC(secret, "trojan")`
-  - SS2022：`HKDF(secret, inbound_id)`，按 method 截取所需长度
+  - Trojan：`HMAC-SHA256(secret, "trojan")` 取前 32 位十六进制
+  - SS2022：`HKDF-SHA256(secret, info="ss2022:<inbound_id>")`，按 method 取 16 / 32 字节；客户端密码为 `服务端密钥:用户密钥`
+- SS2022 入站没有任何有效订阅时，写入由服务端密钥派生的占位用户：Xray 在无用户时会退化为单用户模式，仅凭服务端密钥即可连接，占位用户可防止已移除的订阅继续使用（已实测）。
 - Xray client email 统一为 `s{subId}.i{inboundId}`，统计天然细到"订阅 × 入站"。
 - 入站生效 clients = `enabled 且 state=active 的订阅` ∩ `(all_inbounds 或 在授权表中)`。
 - 订阅地址：`<public_url>/<sub_path>/{token}`，`sub_path` 首次启动随机生成、可在设置中修改，且不能与面板路径相同；令牌无效或订阅停用时一律 404。
 - 订阅链接令牌可单独重置（旧链接失效、已导入节点不受影响）；凭据重置则使已导入节点失效。
 - 节点名称按模板生成（`{node}` `{remark}` `{port}`），重名自动追加序号。
-  - 按 User-Agent 自动选择格式，`?format=` 可强制。
+  - 按 User-Agent 自动选择格式（sing-box → Mihomo → Base64），`?format=base64|mihomo|singbox` 可强制。
+  - sing-box 输出 1.12+ 格式（TUN + 本地 mixed 入站），规则集不设置 `download_detour`：它在 1.14 被弃用，而替代的 `http_client` 在 1.12 / 1.13 上无法解析。1.14 下会有一条弃用警告，1.16 起需按客户端版本输出 `http_clients`。
+  - sing-box 的 VMess `security: auto` 会被 Xray 拒绝（unknown security type），输出时固定为 `aes-128-gcm`。
   - 返回 `subscription-userinfo`、`profile-update-interval`、`content-disposition` 头。
   - Mihomo 使用内置精简模板（select + url-test + 基础规则），已用 Mihomo v1.19.33 校验配置并实际连通。
 
@@ -228,7 +237,8 @@ var minVersion = map[Feature]Version{ /* M1 对照官方 changelog 填写 */ }
 **版本管理**
 
 - 系统设置：默认安装版本、可选版本上限；升级列表只显示不超过上限的版本。
-- 单服务器可锁定版本，批量升级跳过。
+- 单服务器可锁定版本：批量切换时保持锁定版本，新装 Xray 也使用锁定版本。
+- 批量切换：所有在线服务器并行切换，返回每台的结果（已切换 / 无需切换 / 失败 / 离线）。
 - Xray 安装包由主控中转：主控从 GitHub 下载、校验 sha256 并缓存，Agent 从 `/dl/xray/{ver}/{arch}` 获取。
 - 测试矩阵：**v26.7.28** 与最新版。最低支持版本取 v1 所用特性要求的最高版本。
 
@@ -299,6 +309,8 @@ services:
 
 也提供二进制 + systemd 的安装方式。
 
+**备份与恢复**：面板「设置 → 备份」下载数据库一致性快照（`VACUUM INTO`），包含全部配置、凭据与流量统计。恢复需停止主控后执行 `xhub-master restore <备份文件>`（容器内：`docker compose run --rm xhub restore /data/<文件>`），原数据库保留为 `.bak-时间戳`。
+
 ### 11.2 被控端
 
 - 一行命令安装，systemd 以专用用户运行，仅授予 `CAP_NET_BIND_SERVICE`。
@@ -350,6 +362,8 @@ node_traffic_hourly(hour, node_id, rx, tx, PK(hour, node_id))
 ```
 
 - 流量表不建外键、冗余 `node_id`：删除服务器或入站后历史保留，前端显示"已删除"。
+- `id_seq` 记录服务器 / 入站 / 订阅的 ID 高水位，新建时取高水位 + 1：SQLite 默认会复用被删除的最大 ID，复用会把已删除对象的流量历史与 Xray 统计标识错配到新对象上。
+- `nodes.xray_pinned_version` 为锁定的 Xray 版本。
 - 当前周期用量读 `subscriptions.used_*`；历史从流量表聚合。
 - 小时明细默认保留 90 天，之后按统计时区汇总入 `traffic_daily`。
 - 实时指标与在线 IP 只在内存。
@@ -360,7 +374,7 @@ node_traffic_hourly(hour, node_id, rx, tx, PK(hour, node_id))
 - Agent 无管理端口；Xray API 仅监听 `127.0.0.1`。
 - Agent 只接受白名单指令，无远程 shell。
 - 接入令牌一次性、短时效；节点 secret、会话 token、接入令牌在库中只存哈希。
-- 面板路径随机化、登录限流、可选 TOTP。
+- 面板路径随机化、登录限流、可选 TOTP 两步验证（RFC 6238，允许前后各 30 秒偏差；`admin reset` 同时关闭）。
 - 订阅路径与面板路径分离，分享链接不暴露面板入口。
 
 ## 14. 目录结构
@@ -393,4 +407,6 @@ x-hub/
 |---|---|
 | ~~XTLS Vision 在 Linux splice 场景下用户流量计数是否准确~~ | 已验证（v26.7.28，splice 路径下载 20MB 统计偏差 +0.17%，上传 5MB +0.15%） |
 | 能力表中各特性的最低 Xray 版本（已确认 v26.7.28 支持 `online_stats`） | M2 |
-| v26.7.28 下 Shadowrocket 对各协议组合的兼容性 | M2 / M5 |
+| v26.7.28 下 Shadowrocket 对各协议组合的兼容性 | 待真实设备验证 |
+| ACME 在真实 Cloudflare 域名上的签发与续签 | 待真实环境验证（失败路径已验证） |
+| sing-box 1.16 起需按客户端版本输出 `http_clients` | 1.16 发布后 |

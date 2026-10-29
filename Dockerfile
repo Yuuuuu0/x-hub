@@ -28,4 +28,5 @@ FROM gcr.io/distroless/static-debian12
 COPY --from=build /out/xhub-master /usr/local/bin/xhub-master
 COPY --from=build /out/agents /app/agents
 VOLUME /data
-ENTRYPOINT ["xhub-master", "run", "--data", "/data", "--agents", "/app/agents"]
+ENTRYPOINT ["xhub-master"]
+CMD ["run", "--data", "/data", "--agents", "/app/agents"]
