@@ -162,6 +162,8 @@ Inbound
 - 保存前由 Agent 检查端口占用。
 - 全局 Xray 行为（屏蔽 BT、屏蔽私有 IP、IPv4/IPv6 优先、DNS）以开关呈现。
 - 较新的协议特性默认关闭并标注"部分客户端不支持"，默认产物保证主流客户端（含 Shadowrocket）可用。
+- Xray v26.3.27 之后的版本在 `minClientVer` 留空时默认拒绝低于 26.3.27 的客户端，表单在「高级」中提供该字段，供第三方客户端无法连接时调低。
+- 默认目标为 `dl.google.com:443`；快选列表不含 Xray 告警的 apple / icloud / microsoft 类域名（实测 `www.microsoft.com` 在部分网络下 Reality 握手失败），命中告警规则时表单给出提示。
 
 ## 7. 订阅与凭据
 
@@ -362,9 +364,9 @@ online_peak_hourly(hour, sub_id, peak_ips, PK(hour, sub_id))
 x-hub/
 ├─ cmd/{master,agent}/
 ├─ internal/
-│  ├─ master/{api, service, store, hub, compiler, sub, accounting, settings}
-│  ├─ agent/{conn, applier, xray, ledger, metrics}
-│  └─ shared/{protocol, model, xraycap}
+│  ├─ master/{api, store, hub, model, compiler, syncer, sub, accounting, settings}
+│  ├─ agent/{conn, xray, probe, ledger, metrics}
+│  └─ shared/{protocol, xraycap, tlspin}
 ├─ web/                      # Vue3 + Ant Design Vue
 ├─ deploy/{install.sh, systemd, docker-compose.yml}
 └─ docs/
@@ -384,6 +386,6 @@ x-hub/
 
 | 事项 | 时机 |
 |---|---|
-| XTLS Vision 在 Linux splice 场景下用户流量计数是否准确 | M2 |
+| ~~XTLS Vision 在 Linux splice 场景下用户流量计数是否准确~~ | 已验证（v26.7.28，splice 路径下载 20MB 统计偏差 +0.17%，上传 5MB +0.15%） |
 | 能力表中各特性的最低 Xray 版本（已确认 v26.7.28 支持 `online_stats`） | M2 |
 | v26.7.28 下 Shadowrocket 对各协议组合的兼容性 | M2 / M5 |
