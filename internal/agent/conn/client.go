@@ -19,6 +19,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/Yuuuuu0/x-hub/internal/agent/config"
+	"github.com/Yuuuuu0/x-hub/internal/agent/ledger"
 	"github.com/Yuuuuu0/x-hub/internal/agent/metrics"
 	"github.com/Yuuuuu0/x-hub/internal/agent/probe"
 	"github.com/Yuuuuu0/x-hub/internal/agent/xray"
@@ -29,6 +30,8 @@ import (
 
 const (
 	heartbeatEvery = 15 * time.Second
+	trafficEvery   = 30 * time.Second
+	maxBatches     = 200 // 单条上报消息的批次上限
 	pingEvery      = 30 * time.Second
 	dialTimeout    = 20 * time.Second
 	writeTimeout   = 10 * time.Second
@@ -40,15 +43,16 @@ var errUnauthorized = errors.New("主控拒绝了节点凭据，请在面板重�
 
 // Client 维护与主控的连接。
 type Client struct {
-	cfg  *config.Config
-	xray *xray.Manager
-	log  *slog.Logger
-	host protocol.HostInfo
+	cfg    *config.Config
+	xray   *xray.Manager
+	ledger *ledger.Ledger
+	log    *slog.Logger
+	host   protocol.HostInfo
 }
 
 // New 创建客户端。
-func New(cfg *config.Config, xm *xray.Manager, log *slog.Logger) *Client {
-	return &Client{cfg: cfg, xray: xm, log: log, host: metrics.HostInfo()}
+func New(cfg *config.Config, xm *xray.Manager, l *ledger.Ledger, log *slog.Logger) *Client {
+	return &Client{cfg: cfg, xray: xm, ledger: l, log: log, host: metrics.HostInfo()}
 }
 
 // Run 依次尝试候选地址连接主控，直到 ctx 结束。
@@ -111,6 +115,9 @@ func (c *Client) session(ctx context.Context, ep protocol.Endpoint, idx int) (co
 	}
 	c.log.Info("connected to master", "url", ep.URL)
 	c.syncEndpoint(ep, idx, welcome.Endpoint)
+	if err := c.ledger.Ack(welcome.AckSeq); err != nil {
+		c.log.Warn("ack ledger", "err", err)
+	}
 
 	sctx, scancel := context.WithCancel(ctx)
 	defer scancel()
@@ -151,14 +158,33 @@ func readWelcome(ctx context.Context, ws *websocket.Conn) (protocol.Welcome, err
 func (c *Client) heartbeatLoop(ctx context.Context, cancel context.CancelFunc, ws *websocket.Conn) {
 	hb := time.NewTicker(heartbeatEvery)
 	ping := time.NewTicker(pingEvery)
+	traffic := time.NewTicker(trafficEvery)
 	defer hb.Stop()
 	defer ping.Stop()
+	defer traffic.Stop()
 	send := func() bool {
 		s := metrics.Sample()
 		s.Xray, s.Caps = c.xray.Status(), c.xray.Caps()
+		s.Online = c.xray.OnlineIPs()
 		return c.write(ctx, ws, protocol.TypeHeartbeat, "", s) == nil
 	}
-	if !send() {
+	// sendTraffic 上报全部待确认批次，未确认的会在下个周期重发，主控按序号去重。
+	sendTraffic := func() bool {
+		batches, err := c.ledger.Seal()
+		if err != nil {
+			c.log.Warn("seal ledger", "err", err)
+			return true
+		}
+		if len(batches) == 0 {
+			return true
+		}
+		if len(batches) > maxBatches {
+			batches = batches[:maxBatches]
+		}
+		return c.write(ctx, ws, protocol.TypeTraffic, "", protocol.Traffic{Batches: batches}) == nil
+	}
+	// 连接建立后立即补报断线期间积压的流量，不等第一个上报周期。
+	if !send() || !sendTraffic() {
 		cancel()
 		return
 	}
@@ -168,6 +194,11 @@ func (c *Client) heartbeatLoop(ctx context.Context, cancel context.CancelFunc, w
 			return
 		case <-hb.C:
 			if !send() {
+				cancel()
+				return
+			}
+		case <-traffic.C:
+			if !sendTraffic() {
 				cancel()
 				return
 			}
@@ -199,6 +230,13 @@ func (c *Client) readLoop(ctx context.Context, ws *websocket.Conn) error {
 			continue
 		}
 		switch env.T {
+		case protocol.TypeAck:
+			var a protocol.Ack
+			if json.Unmarshal(env.D, &a) == nil {
+				if err := c.ledger.Ack(a.Seq); err != nil {
+					c.log.Warn("ack ledger", "err", err)
+				}
+			}
 		case protocol.TypeEndpoint:
 			var ep protocol.Endpoint
 			if json.Unmarshal(env.D, &ep) == nil {

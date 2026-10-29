@@ -8,10 +8,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/Yuuuuu0/x-hub/internal/agent/config"
 	"github.com/Yuuuuu0/x-hub/internal/agent/conn"
+	"github.com/Yuuuuu0/x-hub/internal/agent/ledger"
 	"github.com/Yuuuuu0/x-hub/internal/agent/xray"
 	"github.com/Yuuuuu0/x-hub/internal/version"
 )
@@ -77,15 +79,21 @@ func run(cfgPath string) error {
 	if err != nil {
 		return err
 	}
+	led, err := ledger.Open(filepath.Join(cfg.DataDir, "ledger.json"))
+	if err != nil {
+		return fmt.Errorf("读取流量账本失败：%w", err)
+	}
+	collector := conn.NewCollector(led, xm, log)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Info("xhub-agent starting", "version", version.Version, "node", cfg.NodeID)
 	done := make(chan struct{})
 	go func() {
-		xm.Supervise(ctx)
+		xm.Supervise(ctx) // 退出时停止 Xray，停止前会触发一次流量采集
 		close(done)
 	}()
-	conn.New(cfg, xm, log).Run(ctx)
+	go collector.Run(ctx)
+	conn.New(cfg, xm, led, log).Run(ctx)
 	<-done
 	return nil
 }

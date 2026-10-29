@@ -52,16 +52,24 @@ func Sample() protocol.Heartbeat {
 	if up, err := host.Uptime(); err == nil {
 		hb.Uptime = up
 	}
-	if nics, err := net.IOCounters(true); err == nil {
-		for _, n := range nics {
-			if isVirtual(n.Name) {
-				continue
-			}
-			hb.NetRx += n.BytesRecv
-			hb.NetTx += n.BytesSent
-		}
-	}
+	hb.NetRx, hb.NetTx = NetCounters()
 	return hb
+}
+
+// NetCounters 返回物理网卡开机以来的累计收发字节数。
+func NetCounters() (rx, tx uint64) {
+	nics, err := net.IOCounters(true)
+	if err != nil {
+		return 0, 0
+	}
+	for _, n := range nics {
+		if isVirtual(n.Name) {
+			continue
+		}
+		rx += n.BytesRecv
+		tx += n.BytesSent
+	}
+	return rx, tx
 }
 
 func isVirtual(name string) bool {

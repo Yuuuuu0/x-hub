@@ -14,6 +14,8 @@ const (
 	TypeLogs      = "logs"      // M→A 读取 Xray 最近日志
 	TypeApply     = "apply"     // M→A 下发完整 Xray 配置
 	TypeProbe     = "probe"     // M→A 在被控端本机执行探测
+	TypeTraffic   = "traffic"   // A→M 上报流量账本批次
+	TypeAck       = "ack"       // M→A 确认已入库的最大批次序号
 )
 
 // 探测类型。
@@ -119,10 +121,30 @@ type ProbePortResult struct {
 	Owned bool `json:"owned"`
 }
 
-// Welcome 为主控对 Hello 的应答。
+// Welcome 为主控对 Hello 的应答。AckSeq 为主控已入库的最大流量批次序号。
 type Welcome struct {
 	ServerTime int64    `json:"serverTime"`
 	Endpoint   Endpoint `json:"endpoint"` // 主控当前推荐的访问地址
+	AckSeq     int64    `json:"ackSeq"`
+}
+
+// TrafficBatch 为一个小时内累计的流量增量。Users 键为 Xray 用户 email，值为 [上行, 下行] 字节数。
+type TrafficBatch struct {
+	Seq   int64               `json:"seq"`
+	Hour  int64               `json:"hour"` // 整点 Unix 时间戳
+	Users map[string][2]int64 `json:"users,omitempty"`
+	NICRx int64               `json:"nicRx"`
+	NICTx int64               `json:"nicTx"`
+}
+
+// Traffic 为流量上报消息，批次按序号递增。
+type Traffic struct {
+	Batches []TrafficBatch `json:"batches"`
+}
+
+// Ack 为主控对流量上报的确认。
+type Ack struct {
+	Seq int64 `json:"seq"`
 }
 
 // Heartbeat 为被控端周期性上报的资源与进程状态。网卡计数为开机以来累计值。
@@ -142,6 +164,8 @@ type Heartbeat struct {
 	NetTx     uint64     `json:"netTx"`
 	Xray      XrayStatus `json:"xray"`
 	Caps      []string   `json:"caps"`
+	// Online 为当前在线用户的来源 IP（email → IP 列表），仅支持 online_stats 的 Xray 上报。
+	Online map[string][]string `json:"online,omitempty"`
 }
 
 // Result 为被控端对指令的执行结果。

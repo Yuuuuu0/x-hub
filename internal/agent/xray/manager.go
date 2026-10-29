@@ -45,6 +45,8 @@ type Manager struct {
 	ops  sync.Mutex
 
 	changes chan struct{}
+	// beforeStop 在停止 Xray 前调用，用于先读走内存中的流量计数。
+	beforeStop func()
 
 	mu        sync.Mutex
 	st        state
@@ -267,6 +269,9 @@ func (m *Manager) stopProc() {
 	m.mu.Unlock()
 	if proc == nil {
 		return
+	}
+	if m.beforeStop != nil {
+		m.beforeStop()
 	}
 	proc.Process.Signal(syscall.SIGTERM)
 	select {
