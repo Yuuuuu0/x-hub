@@ -31,6 +31,7 @@ type Subscription struct {
 	UsedDown    int64  `json:"usedDown"`
 	ResetDay    int    `json:"resetDay"`      // 每月流量重置日（1-28），0 表示不自动重置
 	PeriodStart int64  `json:"periodStartAt"` // 当前计量周期起点
+	ProfileID   int64  `json:"profileId"`     // 分流方案，0 为内置精简方案
 	CreatedAt   int64  `json:"createdAt"`
 }
 
@@ -38,12 +39,12 @@ type Subscription struct {
 func (s *Subscription) Active() bool { return s.Enabled && s.State == SubActive }
 
 const subColumns = `id, name, note, sort, token, secret, uuid, enabled, state, all_inbounds, limit_bytes, expire_at,
-	used_up, used_down, reset_day, period_start_at, created_at`
+	used_up, used_down, reset_day, period_start_at, profile_id, created_at`
 
 func scanSub(r rowScanner) (*Subscription, error) {
 	var s Subscription
 	err := r.Scan(&s.ID, &s.Name, &s.Note, &s.Sort, &s.Token, &s.Secret, &s.UUID, &s.Enabled, &s.State, &s.AllInbounds,
-		&s.LimitBytes, &s.ExpireAt, &s.UsedUp, &s.UsedDown, &s.ResetDay, &s.PeriodStart, &s.CreatedAt)
+		&s.LimitBytes, &s.ExpireAt, &s.UsedUp, &s.UsedDown, &s.ResetDay, &s.PeriodStart, &s.ProfileID, &s.CreatedAt)
 	return &s, err
 }
 

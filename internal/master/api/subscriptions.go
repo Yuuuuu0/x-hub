@@ -91,6 +91,7 @@ type subInput struct {
 	LimitBytes  *int64  `json:"limitBytes"`
 	ExpireAt    *int64  `json:"expireAt"`
 	ResetDay    *int    `json:"resetDay"`
+	ProfileID   *int64  `json:"profileId"`
 }
 
 // quotaSet 表示请求携带了额度相关字段。
@@ -117,6 +118,19 @@ func (in *subInput) validate() error {
 		return errors.New("重置日需在 1 到 28 之间，0 表示不重置")
 	}
 	return nil
+}
+
+// applyProfile 设置订阅使用的分流方案，未携带时不修改。
+func (h *Handler) applyProfile(id int64, in *subInput) error {
+	if in.ProfileID == nil {
+		return nil
+	}
+	if *in.ProfileID != 0 {
+		if _, err := h.Store.GetProfile(*in.ProfileID); err != nil {
+			return errors.New("所选分流方案不存在")
+		}
+	}
+	return h.Store.SetSubscriptionProfile(id, *in.ProfileID)
 }
 
 // applyQuota 写入额度字段，未携带的字段沿用当前值。
@@ -158,6 +172,9 @@ func (h *Handler) createSubscription(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = h.applyQuota(id, &in)
 	}
+	if err == nil {
+		err = h.applyProfile(id, &in)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -194,6 +211,10 @@ func (h *Handler) updateSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.applyQuota(id, &in); err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if err := h.applyProfile(id, &in); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	h.Accounting.Evaluate(id)
@@ -341,8 +362,15 @@ func (h *Handler) serveSubscription(w http.ResponseWriter, r *http.Request, toke
 		return
 	}
 	format := sub.DetectFormat(r.UserAgent(), r.URL.Query().Get("format"))
-	body, ctype, err := sub.Render(format, nodes)
+	var body []byte
+	ctype := "text/yaml; charset=utf-8"
+	if p := h.subscriptionProfile(s); p != nil && format == sub.FormatMihomo {
+		body, _, err = h.renderMihomoProfile(p, s)
+	} else {
+		body, ctype, err = sub.Render(format, nodes)
+	}
 	if err != nil {
+		h.Log.Warn("render subscription", "sub", s.ID, "format", format, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

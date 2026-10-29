@@ -28,6 +28,7 @@ const (
 	keySubscription = "subscription"
 	keyStats        = "stats"
 	keyCerts        = "certs"
+	keyRulesToken   = "rules_token"
 )
 
 // DefaultListen 为默认监听地址。2096 位于 Cloudflare 支持代理的 HTTPS 端口列表中。
@@ -90,6 +91,7 @@ type Service struct {
 	stats    Stats
 	loc      *time.Location
 	certs    Certs
+	rules    string // 托管规则集地址中的随机令牌
 }
 
 // Load 从数据库加载全部设置，缺失项写入默认值。firstRun 表示访问设置此前不存在。
@@ -134,7 +136,24 @@ func Load(st *store.Store, newPanelPath func() string) (svc *Service, firstRun b
 	if _, err := st.GetSetting(keyCerts, &svc.certs); err != nil {
 		return nil, false, err
 	}
+	ok, err = st.GetSetting(keyRulesToken, &svc.rules)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok || svc.rules == "" {
+		svc.rules = newPanelPath() + newPanelPath()
+		if err := st.PutSetting(keyRulesToken, svc.rules); err != nil {
+			return nil, false, err
+		}
+	}
 	return svc, firstRun, nil
+}
+
+// RulesToken 返回托管规则集地址中的随机令牌，客户端无法携带登录信息下载规则集，以此防止被枚举。
+func (s *Service) RulesToken() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rules
 }
 
 // Certs 返回证书凭据。

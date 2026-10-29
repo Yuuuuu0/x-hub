@@ -87,6 +87,17 @@ func (h *Handler) Init() {
 	m.HandleFunc("PUT /api/settings/certs", h.authed(h.putCertsSettings))
 	m.HandleFunc("GET /api/tools/ss-key", h.authed(h.ssKey))
 	m.HandleFunc("PUT /api/settings/subscription", h.authed(h.putSubscriptionSettings))
+	m.HandleFunc("GET /api/profiles", h.authed(h.listProfiles))
+	m.HandleFunc("POST /api/profiles", h.authed(h.createProfile))
+	m.HandleFunc("POST /api/profiles/import", h.authed(h.importProfile))
+	m.HandleFunc("POST /api/profiles/preview", h.authed(h.previewProfile))
+	m.HandleFunc("GET /api/profiles/{id}", h.authed(h.getProfile))
+	m.HandleFunc("PUT /api/profiles/{id}", h.authed(h.updateProfile))
+	m.HandleFunc("DELETE /api/profiles/{id}", h.authed(h.deleteProfile))
+	m.HandleFunc("GET /api/rulesets", h.authed(h.listRuleSets))
+	m.HandleFunc("POST /api/rulesets", h.authed(h.createRuleSet))
+	m.HandleFunc("PUT /api/rulesets/{id}", h.authed(h.updateRuleSet))
+	m.HandleFunc("DELETE /api/rulesets/{id}", h.authed(h.deleteRuleSet))
 	m.HandleFunc("POST /api/tools/x25519", h.authed(h.x25519))
 	m.HandleFunc("GET /api/tools/short-id", h.authed(h.shortID))
 	m.HandleFunc("GET /api/xray/releases", h.authed(h.xrayReleases))
@@ -114,6 +125,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rest, ok := strings.CutPrefix(p, "/"+h.Settings.Subscription().Path+"/"); ok {
+		if ruleRest, isRule := strings.CutPrefix(rest, "rules/"); isRule {
+			h.serveHostedRuleSet(w, r, ruleRest)
+			return
+		}
 		h.serveSubscription(w, r, rest)
 		return
 	}
