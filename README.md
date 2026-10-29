@@ -13,7 +13,7 @@
 - **版本管理**：版本上限、单服务器锁定版本、批量切换（失败自动回滚）
 - **账户安全**：可选 TOTP 两步验证
 - **备份恢复**：一键下载数据库快照，命令行恢复
-- **零环境变量**：所有参数均在面板「设置」中修改，修改端口 / TLS 模式无需重启
+- **零环境变量**：业务参数均在面板「设置」中修改，切换 TLS 模式、面板路径无需重启
 - **表单式入站**：VLESS + Reality + Vision、VLESS + XHTTP + Reality、VLESS / VMess + WS + TLS、Trojan + TLS、Shadowsocks 2022；一键生成 X25519 密钥、ShortID 与 SS2022 密钥，Reality 目标网站可从服务器本机实测 TLS 1.3 / H2
 - **节点证书**：填写节点上已有证书的路径（保存前实测可读），或由被控端经 Let's Encrypt + Cloudflare DNS 自动申请与续签
 - **自动下发**：保存后主控编译配置并推送，被控端校验后替换配置并重启 Xray；离线服务器上线后自动补发，面板展示同步状态
@@ -35,11 +35,113 @@ docker compose up -d
 docker logs xhub        # 查看面板地址与初始密码
 ```
 
-首次启动默认监听 `:2096`、使用自签证书，面板路径随机生成。登录后：
+首次启动默认使用自签证书，面板路径随机生成。容器内固定监听 2096，宿主机端口被占用时修改 compose 中端口映射的左侧即可（如 `"8443:2096"`）。登录后：
 
 1. 确认「公开访问地址」（被控端与订阅链接使用）
 2. 如有自己的证书，在 compose 中挂载证书目录，再到「设置 → 访问」切换为「证书文件」模式
 3. 在「设置 → 账户与安全」修改初始密码
+
+### Nginx 反向代理
+
+由 Nginx 终结 TLS、主控只对本机开放时，按以下步骤配置。
+
+**1. compose 端口只绑定本机**
+
+```yaml
+    ports:
+      - "127.0.0.1:2096:2096"
+```
+
+**2. 先通过 SSH 隧道进入面板完成切换**
+
+此时外部已无法直连 2096，在本地电脑执行：
+
+```bash
+ssh -L 2096:127.0.0.1:2096 root@<服务器IP>
+```
+
+然后浏览器访问 `https://127.0.0.1:2096/<面板路径>/`（自签证书，需手动信任），在「设置 → 访问」中：
+
+| 设置项 | 值 |
+|---|---|
+| TLS 模式 | 反向代理 |
+| 公开访问地址 | `https://hub.example.com`（Nginx 对外的地址，非 443 端口需带上端口） |
+| 可信代理 | Docker 部署填 `172.16.0.0/12`（经端口映射访问时，主控看到的来源是 Docker 网桥地址；自定义过网段时用 `docker network inspect` 查看）；二进制部署填 `127.0.0.1` |
+
+保存后主控改为提供 HTTP，再配置 Nginx。
+
+**3. Nginx 配置**
+
+```nginx
+# 放在 http {} 块中：仅对 WebSocket 请求发送 Connection: upgrade
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      '';
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;                      # Nginx 1.25.1 以下改为 listen 443 ssl http2;
+    server_name hub.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/hub.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/hub.example.com/privkey.pem;
+
+    # 面板、订阅链接与被控端接入均由主控按路径分发，未知路径主控返回 404，整站转发即可。
+    location / {
+        proxy_pass http://127.0.0.1:2096;
+        proxy_http_version 1.1;
+
+        # 被控端通过 /agent/ws 保持 WebSocket 长连接
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # 主控优先采信 CF-Connecting-IP，必须清除客户端自带的该头，否则可伪造来源 IP 绕过登录限流
+        proxy_set_header CF-Connecting-IP "";
+
+        # 被控端每 15 秒发送心跳；首次安装 Xray 时主控需先从 GitHub 下载安装包，留足超时
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_buffering off;
+    }
+}
+```
+
+**Nginx 前面还有 Cloudflare 橙云时**，在 `server {}` 中加入以下配置，由 Nginx 还原真实客户端 IP 后再经 `X-Real-IP` 传给主控（`CF-Connecting-IP` 仍照常清除）：
+
+```nginx
+    real_ip_header CF-Connecting-IP;
+    # Cloudflare 回源 IP 段，完整列表见 https://www.cloudflare.com/ips/
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 131.0.72.0/22;
+    set_real_ip_from 2400:cb00::/32;
+    set_real_ip_from 2606:4700::/32;
+    set_real_ip_from 2803:f800::/32;
+    set_real_ip_from 2405:b500::/32;
+    set_real_ip_from 2405:8100::/32;
+    set_real_ip_from 2a06:98c0::/29;
+    set_real_ip_from 2c0f:f248::/32;
+```
+
+此时主控的可信代理仍按第 2 步填写（Nginx 的地址），无需填入 Cloudflare 网段。
 
 ### 应急命令
 
