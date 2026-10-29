@@ -18,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/Yuuuuu0/x-hub/internal/agent/certs"
 	"github.com/Yuuuuu0/x-hub/internal/agent/config"
 	"github.com/Yuuuuu0/x-hub/internal/agent/ledger"
 	"github.com/Yuuuuu0/x-hub/internal/agent/metrics"
@@ -45,14 +46,15 @@ var errUnauthorized = errors.New("主控拒绝了节点凭据，请在面板重�
 type Client struct {
 	cfg    *config.Config
 	xray   *xray.Manager
+	certs  *certs.Manager
 	ledger *ledger.Ledger
 	log    *slog.Logger
 	host   protocol.HostInfo
 }
 
 // New 创建客户端。
-func New(cfg *config.Config, xm *xray.Manager, l *ledger.Ledger, log *slog.Logger) *Client {
-	return &Client{cfg: cfg, xray: xm, ledger: l, log: log, host: metrics.HostInfo()}
+func New(cfg *config.Config, xm *xray.Manager, cm *certs.Manager, l *ledger.Ledger, log *slog.Logger) *Client {
+	return &Client{cfg: cfg, xray: xm, certs: cm, ledger: l, log: log, host: metrics.HostInfo()}
 }
 
 // Run 依次尝试候选地址连接主控，直到 ctx 结束。
@@ -247,7 +249,7 @@ func (c *Client) readLoop(ctx context.Context, ws *websocket.Conn) error {
 		case protocol.TypeXray:
 			go c.reply(ctx, ws, env.ID, c.handleXray(ctx, env.D))
 		case protocol.TypeApply:
-			go c.reply(ctx, ws, env.ID, c.handleApply(env.D))
+			go c.reply(ctx, ws, env.ID, c.handleApply(ctx, env.D))
 		case protocol.TypeProbe:
 			go c.reply(ctx, ws, env.ID, c.handleProbe(ctx, env.D))
 		case protocol.TypeLogs:
@@ -290,13 +292,31 @@ func (c *Client) handleXray(ctx context.Context, raw json.RawMessage) protocol.R
 }
 
 // handleApply 应用主控下发的 Xray 配置。
-func (c *Client) handleApply(raw json.RawMessage) protocol.Result {
+func (c *Client) handleApply(ctx context.Context, raw json.RawMessage) protocol.Result {
 	var a protocol.Apply
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return protocol.Result{Error: err.Error()}
 	}
-	if err := c.xray.Apply(a.Rev, a.Hash, a.Config); err != nil {
+	cfg := a.Config
+	var certErr error
+	var dropped []string
+	if a.ACME != nil {
+		cctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+		certErr = c.certs.Ensure(cctx, *a.ACME)
+		cancel()
+		// 证书申请失败时只跳过缺证书的入站，其余配置照常生效；不记录为已应用，主控会显示失败并在下次同步时重试。
+		if certErr != nil {
+			var err error
+			if cfg, dropped, err = certs.DropMissing(cfg, c.cfg.DataDir); err != nil {
+				return protocol.Result{Error: err.Error()}
+			}
+		}
+	}
+	if err := c.xray.Apply(a.Rev, a.Hash, cfg, certErr == nil); err != nil {
 		return protocol.Result{Error: err.Error()}
+	}
+	if certErr != nil {
+		return protocol.Result{Error: fmt.Sprintf("%v（%s 暂未启用，其余入站已生效）", certErr, strings.Join(dropped, ", "))}
 	}
 	rev, hash := c.xray.Applied()
 	return okResult(protocol.ApplyResult{Rev: rev, Hash: hash})
@@ -313,6 +333,8 @@ func (c *Client) handleProbe(ctx context.Context, raw json.RawMessage) protocol.
 		return okResult(probe.RealityTarget(ctx, req.Target, req.ServerName))
 	case protocol.ProbePort:
 		return okResult(c.xray.PortStatus(req.Port))
+	case protocol.ProbeCertFiles:
+		return okResult(certs.CheckFiles(req.CertFile, req.KeyFile))
 	}
 	return protocol.Result{Error: "未知探测类型：" + req.Kind}
 }

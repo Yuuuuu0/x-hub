@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/Yuuuuu0/x-hub/internal/agent/certs"
 	"github.com/Yuuuuu0/x-hub/internal/agent/config"
 	"github.com/Yuuuuu0/x-hub/internal/agent/conn"
 	"github.com/Yuuuuu0/x-hub/internal/agent/ledger"
@@ -84,6 +85,7 @@ func run(cfgPath string) error {
 		return fmt.Errorf("读取流量账本失败：%w", err)
 	}
 	collector := conn.NewCollector(led, xm, log)
+	cm := certs.New(cfg.DataDir, log)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Info("xhub-agent starting", "version", version.Version, "node", cfg.NodeID)
@@ -93,7 +95,8 @@ func run(cfgPath string) error {
 		close(done)
 	}()
 	go collector.Run(ctx)
-	conn.New(cfg, xm, led, log).Run(ctx)
+	go cm.RenewLoop(ctx)
+	conn.New(cfg, xm, cm, led, log).Run(ctx)
 	<-done
 	return nil
 }

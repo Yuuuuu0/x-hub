@@ -19,8 +19,8 @@ func (m *Manager) Applied() (int64, string) {
 }
 
 // Apply 应用主控下发的配置：注入自管段、校验、原子替换，并在 Xray 期望运行时重启生效。
-// 版本号低于已应用版本的配置视为过期并忽略。
-func (m *Manager) Apply(rev int64, hash string, cfg []byte) error {
+// 版本号低于已应用版本的配置视为过期并忽略。commit 为 false 时（配置被部分裁剪）不记录为已应用版本。
+func (m *Manager) Apply(rev int64, hash string, cfg []byte, commit bool) error {
 	m.ops.Lock()
 	defer m.ops.Unlock()
 	if cur, _ := m.Applied(); rev < cur {
@@ -50,7 +50,9 @@ func (m *Manager) Apply(rev int64, hash string, cfg []byte) error {
 		return err
 	}
 	m.mu.Lock()
-	m.st.AppliedRev, m.st.AppliedHash = rev, hash
+	if commit {
+		m.st.AppliedRev, m.st.AppliedHash = rev, hash
+	}
 	enabled := m.st.Enabled
 	err = m.saveState()
 	m.mu.Unlock()
