@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { Check, Copy, RefreshCw, Terminal } from 'lucide-vue-next'
+import { Check, CircleCheck, Copy, LoaderCircle, RefreshCw, Terminal } from 'lucide-vue-next'
 import { api, type NodeItem } from '../lib/api'
 import { copyText } from '../lib/clipboard'
 import { datetime } from '../lib/format'
 
-// 为服务器生成一次性接入令牌与安装命令。
+// 为服务器生成一次性接入令牌与安装命令，并实时显示接入进度（node 由父组件随轮询更新）。
 const props = defineProps<{ node: NodeItem | null }>()
 const open = defineModel<boolean>('open', { required: true })
 
@@ -15,6 +15,15 @@ const expireAt = ref(0)
 const loading = ref(false)
 const error = ref('')
 const copied = ref(false)
+const baseline = ref(0)
+
+/** 接入进度：只认打开弹窗之后建立的新连接（重装时旧连接会被断开），不依赖浏览器与主控的时钟一致。 */
+const progress = computed(() => {
+  const rt = props.node?.runtime
+  if (!rt?.online || rt.connectedAt === baseline.value) return { done: false, text: '等待在 VPS 上执行安装命令…' }
+  if (rt.xray.running) return { done: true, text: `已上线，Xray ${rt.xray.version} 运行中` }
+  return { done: false, text: '已接入，正在安装并启动 Xray…' }
+})
 
 // 卸载命令复用同一下载方式，只替换脚本参数。
 const uninstall = computed(() => command.value.split('| bash -s --')[0] + '| bash -s -- --uninstall')
@@ -36,7 +45,12 @@ async function generate() {
   }
 }
 
-watch(open, (v) => v && generate())
+watch(open, (v) => {
+  if (!v) return
+  const rt = props.node?.runtime
+  baseline.value = rt?.online ? rt.connectedAt : -1
+  generate()
+})
 
 async function copy() {
   if (await copyText(command.value)) {
@@ -67,6 +81,10 @@ async function copy() {
           <component :is="copied ? Check : Copy" :size="15" />
           {{ copied ? '已复制' : '复制' }}
         </a-button>
+      </div>
+      <div :class="['progress', { done: progress.done }]" role="status">
+        <component :is="progress.done ? CircleCheck : LoaderCircle" :size="16" :class="{ spin: !progress.done }" />
+        {{ progress.text }}
       </div>
       <ul class="notes">
         <li>令牌仅能使用一次，<span class="mono">{{ datetime(expireAt) }}</span> 前有效。</li>
@@ -134,6 +152,31 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-2);
+}
+.progress.done {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .notes {
   margin: 16px 0 0;

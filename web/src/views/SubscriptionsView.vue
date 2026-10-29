@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import { BarChart3, ChevronDown, KeyRound, Link2, MonitorSmartphone, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { api, type InboundItem, type ProfileItem, type Subscription } from '../lib/api'
 import { datetime } from '../lib/format'
+import { usePolling } from '../lib/poll'
 import SubLinkModal from '../components/SubLinkModal.vue'
 import SubDetailDrawer from '../components/SubDetailDrawer.vue'
 import UsageMeter from '../components/UsageMeter.vue'
@@ -32,7 +33,6 @@ const form = reactive({
 })
 const detailSub = ref<Subscription | null>(null)
 const showDetail = ref(false)
-let timer: number | undefined
 const saving = ref(false)
 const linkSub = ref<Subscription | null>(null)
 const showLink = ref(false)
@@ -64,11 +64,7 @@ async function load() {
   }
 }
 
-onMounted(() => {
-  load()
-  timer = window.setInterval(() => !document.hidden && !showForm.value && load(), 10000)
-})
-onBeforeUnmount(() => clearInterval(timer))
+usePolling(load, () => 10000, () => !showForm.value)
 
 function openDetail(s: Subscription) {
   detailSub.value = s

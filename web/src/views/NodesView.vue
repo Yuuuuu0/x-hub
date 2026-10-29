@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import { Layers, Plus } from 'lucide-vue-next'
 import { api, type CountryItem, type NodeItem } from '../lib/api'
+import { usePolling } from '../lib/poll'
 import { bytesParts } from '../lib/format'
 import NodeCard from '../components/NodeCard.vue'
 import NodeFormModal from '../components/NodeFormModal.vue'
@@ -11,7 +12,9 @@ import XrayInstallModal from '../components/XrayInstallModal.vue'
 import LogsDrawer from '../components/LogsDrawer.vue'
 import BatchUpgradeModal from '../components/BatchUpgradeModal.vue'
 
+// 安装命令弹窗打开时加快刷新，接入后尽快看到上线。
 const POLL_MS = 5000
+const POLL_FAST_MS = 2000
 
 const nodes = ref<NodeItem[]>([])
 const countries = ref<CountryItem[]>([])
@@ -26,8 +29,6 @@ const showVersions = ref(false)
 const showLogs = ref(false)
 const showBatch = ref(false)
 
-let timer: number | undefined
-
 async function load() {
   try {
     const r = await api.get<{ nodes: NodeItem[]; masterVersion: string; countries: CountryItem[] }>('nodes')
@@ -41,19 +42,10 @@ async function load() {
   }
 }
 
-function schedule() {
-  clearTimeout(timer)
-  timer = window.setTimeout(async () => {
-    if (!document.hidden) await load()
-    schedule()
-  }, POLL_MS)
-}
+usePolling(load, () => (showInstall.value ? POLL_FAST_MS : POLL_MS))
 
-onMounted(async () => {
-  await load()
-  schedule()
-})
-onBeforeUnmount(() => clearTimeout(timer))
+/** 弹窗使用列表中的最新数据，以便实时显示接入状态。 */
+const live = computed(() => nodes.value.find((n) => n.id === current.value?.id) ?? current.value)
 
 const stats = computed(() => {
   const enrolled = nodes.value.filter((n) => n.enrolled)
@@ -187,7 +179,7 @@ function remove(n: NodeItem) {
     </TransitionGroup>
 
     <NodeFormModal v-model:open="showForm" :node="current" :countries="countries" @saved="onSaved" />
-    <InstallCommandModal v-model:open="showInstall" :node="current" />
+    <InstallCommandModal v-model:open="showInstall" :node="live" />
     <XrayInstallModal v-model:open="showVersions" :node="current" @done="load" />
     <LogsDrawer v-model:open="showLogs" :node="current" />
     <BatchUpgradeModal v-model:open="showBatch" :nodes="nodes" @done="load" />

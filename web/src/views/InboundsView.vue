@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import { Pencil, Plus, QrCode, Trash2 } from 'lucide-vue-next'
 import { api, type InboundItem, type NodeItem } from '../lib/api'
+import { usePolling } from '../lib/poll'
 import InboundFormDrawer from '../components/InboundFormDrawer.vue'
 import ShareModal from '../components/ShareModal.vue'
 import SyncChip from '../components/SyncChip.vue'
@@ -19,7 +20,6 @@ const current = ref<InboundItem | null>(null)
 const presetNode = ref<number>()
 const showForm = ref(false)
 const showShare = ref(false)
-let timer: number | undefined
 
 async function load() {
   try {
@@ -36,19 +36,7 @@ async function load() {
   }
 }
 
-function schedule() {
-  clearTimeout(timer)
-  timer = window.setTimeout(async () => {
-    if (!document.hidden) await load()
-    schedule()
-  }, POLL_MS)
-}
-
-onMounted(async () => {
-  await load()
-  schedule()
-})
-onBeforeUnmount(() => clearTimeout(timer))
+usePolling(load, () => POLL_MS)
 
 /** 按服务器分组，只展示有入站的服务器。 */
 const groups = computed(() =>
