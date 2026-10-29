@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Yuuuuu0/x-hub/deploy"
+	"github.com/Yuuuuu0/x-hub/internal/master/accounting"
 	"github.com/Yuuuuu0/x-hub/internal/master/api"
 	"github.com/Yuuuuu0/x-hub/internal/master/auth"
 	"github.com/Yuuuuu0/x-hub/internal/master/hub"
@@ -83,8 +84,10 @@ func Run(opts Options) error {
 		AgentDir:      opts.AgentDir,
 		InstallScript: deploy.InstallScript,
 	}
-	h.Hub = hub.New(st, log, h.Endpoint, h.OnAgentHello)
+	h.Hub = hub.New(st, log, hub.Hooks{Endpoint: h.Endpoint, OnHello: h.OnAgentHello})
 	h.Syncer = syncer.New(st, h.Hub, log)
+	h.Accounting = accounting.New(st, cfg, h.Syncer, log)
+	h.Hub.SetTrafficHooks(h.Accounting.LastSeq, h.Accounting.Ingest)
 	h.Init()
 	h.Server = server.New(cfg, certs, h, log)
 	if err := h.Server.Start(); err != nil {
@@ -95,6 +98,7 @@ func Run(opts Options) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go cleanupLoop(ctx, st, log)
+	go h.Accounting.Run(ctx)
 	<-ctx.Done()
 
 	log.Info("shutting down")

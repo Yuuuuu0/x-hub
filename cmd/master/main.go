@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	_ "time/tzdata" // distroless 镜像不含时区数据，统计时区依赖它
 
 	"github.com/Yuuuuu0/x-hub/internal/master/app"
 	"github.com/Yuuuuu0/x-hub/internal/version"

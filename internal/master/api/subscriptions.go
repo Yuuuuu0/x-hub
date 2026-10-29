@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Yuuuuu0/x-hub/internal/master/auth"
@@ -22,11 +23,12 @@ func CreateSubscription(st *store.Store, name, note string) (int64, error) {
 	})
 }
 
-// subView 为订阅列表项：附带订阅链接与单独授权的入站。
+// subView 为订阅列表项：附带订阅链接、单独授权的入站与当前在线 IP。
 type subView struct {
 	*store.Subscription
-	URL        string  `json:"url"`
-	InboundIDs []int64 `json:"inboundIds"`
+	URL        string   `json:"url"`
+	InboundIDs []int64  `json:"inboundIds"`
+	OnlineIPs  []string `json:"onlineIps"`
 }
 
 // subscriptionURL 返回订阅链接，未设置公开访问地址时为空。
@@ -38,10 +40,13 @@ func (h *Handler) subscriptionURL(token string) string {
 	return base + "/" + h.Settings.Subscription().Path + "/" + token
 }
 
-func (h *Handler) viewSubscription(s *store.Subscription, ids map[int64][]int64) subView {
-	v := subView{Subscription: s, URL: h.subscriptionURL(s.Token), InboundIDs: ids[s.ID]}
+func (h *Handler) viewSubscription(s *store.Subscription, ids map[int64][]int64, online map[int64][]string) subView {
+	v := subView{Subscription: s, URL: h.subscriptionURL(s.Token), InboundIDs: ids[s.ID], OnlineIPs: online[s.ID]}
 	if v.InboundIDs == nil {
 		v.InboundIDs = []int64{}
+	}
+	if v.OnlineIPs == nil {
+		v.OnlineIPs = []string{}
 	}
 	return v
 }
@@ -57,9 +62,10 @@ func (h *Handler) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	online := h.Hub.OnlineBySub()
 	out := make([]subView, 0, len(list))
 	for _, s := range list {
-		out = append(out, h.viewSubscription(s, ids))
+		out = append(out, h.viewSubscription(s, ids, online))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"subscriptions": out})
 }
@@ -72,16 +78,24 @@ func (h *Handler) writeSubscription(w http.ResponseWriter, status int, id int64)
 		return
 	}
 	ids, _ := h.Store.SubscriptionInboundIDs()
-	writeJSON(w, status, h.viewSubscription(s, ids))
+	writeJSON(w, status, h.viewSubscription(s, ids, h.Hub.OnlineBySub()))
 }
 
-// subInput 为订阅编辑输入。AllInbounds 为空表示不修改入站范围（如仅切换启用状态）。
+// subInput 为订阅编辑输入。指针字段为空表示不修改（如仅切换启用状态）。
 type subInput struct {
 	Name        string  `json:"name"`
 	Note        string  `json:"note"`
 	Enabled     bool    `json:"enabled"`
 	AllInbounds *bool   `json:"allInbounds"`
 	InboundIDs  []int64 `json:"inboundIds"`
+	LimitBytes  *int64  `json:"limitBytes"`
+	ExpireAt    *int64  `json:"expireAt"`
+	ResetDay    *int    `json:"resetDay"`
+}
+
+// quotaSet 表示请求携带了额度相关字段。
+func (in *subInput) quotaSet() bool {
+	return in.LimitBytes != nil || in.ExpireAt != nil || in.ResetDay != nil
 }
 
 func (in *subInput) validate() error {
@@ -93,7 +107,38 @@ func (in *subInput) validate() error {
 	if utf8.RuneCountInString(in.Note) > 200 {
 		return errors.New("备注不能超过 200 字")
 	}
+	if in.LimitBytes != nil && *in.LimitBytes < 0 {
+		return errors.New("流量上限不能为负数")
+	}
+	if in.ExpireAt != nil && *in.ExpireAt < 0 {
+		return errors.New("到期时间无效")
+	}
+	if in.ResetDay != nil && (*in.ResetDay < 0 || *in.ResetDay > 28) {
+		return errors.New("重置日需在 1 到 28 之间，0 表示不重置")
+	}
 	return nil
+}
+
+// applyQuota 写入额度字段，未携带的字段沿用当前值。
+func (h *Handler) applyQuota(id int64, in *subInput) error {
+	if !in.quotaSet() {
+		return nil
+	}
+	cur, err := h.Store.GetSubscription(id)
+	if err != nil {
+		return err
+	}
+	limit, expire, reset := cur.LimitBytes, cur.ExpireAt, cur.ResetDay
+	if in.LimitBytes != nil {
+		limit = *in.LimitBytes
+	}
+	if in.ExpireAt != nil {
+		expire = *in.ExpireAt
+	}
+	if in.ResetDay != nil {
+		reset = *in.ResetDay
+	}
+	return h.Store.UpdateSubscriptionQuota(id, limit, expire, reset)
 }
 
 func (h *Handler) createSubscription(w http.ResponseWriter, r *http.Request) {
@@ -110,10 +155,14 @@ func (h *Handler) createSubscription(w http.ResponseWriter, r *http.Request) {
 	if err == nil && in.AllInbounds != nil && !*in.AllInbounds {
 		err = h.Store.SetSubscriptionScope(id, false, in.InboundIDs)
 	}
+	if err == nil {
+		err = h.applyQuota(id, &in)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.Accounting.Evaluate(id)
 	h.Syncer.TriggerAll()
 	h.writeSubscription(w, http.StatusCreated, id)
 }
@@ -143,6 +192,11 @@ func (h *Handler) updateSubscription(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := h.applyQuota(id, &in); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	h.Accounting.Evaluate(id)
 	h.Syncer.TriggerAll()
 	h.writeSubscription(w, http.StatusOK, id)
 }
@@ -185,6 +239,88 @@ func (h *Handler) resetSubscriptionToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.writeSubscription(w, http.StatusOK, id)
+}
+
+// resetSubscriptionTraffic 清零订阅当前周期用量，超额状态随之恢复。
+func (h *Handler) resetSubscriptionTraffic(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := h.Store.ResetSubscriptionUsage(id, time.Now().Unix()); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	h.Accounting.Evaluate(id)
+	h.writeSubscription(w, http.StatusOK, id)
+}
+
+// subscriptionTraffic 返回订阅最近 days 天按天汇总的流量，以及当前周期在各入站上的明细。
+func (h *Handler) subscriptionTraffic(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	s, err := h.Store.GetSubscription(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	if days < 1 || days > 366 {
+		days = 30
+	}
+	loc := h.Settings.Location()
+	now := time.Now().In(loc)
+	first := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -(days - 1))
+	series, err := h.Store.SubTrafficSeries(id, first.Unix())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type day struct {
+		Day  string `json:"day"`
+		Up   int64  `json:"up"`
+		Down int64  `json:"down"`
+	}
+	out := make([]day, days)
+	index := map[string]int{}
+	for i := range out {
+		d := first.AddDate(0, 0, i).Format("2006-01-02")
+		out[i].Day, index[d] = d, i
+	}
+	for _, p := range series {
+		if i, ok := index[time.Unix(p.At, 0).In(loc).Format("2006-01-02")]; ok {
+			out[i].Up += p.Up
+			out[i].Down += p.Down
+		}
+	}
+
+	usage, err := h.Store.SubTrafficByInbound(id, s.PeriodStart-s.PeriodStart%3600)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type item struct {
+		store.InboundUsage
+		NodeName string `json:"nodeName"`
+		Remark   string `json:"remark"`
+		Deleted  bool   `json:"deleted"`
+	}
+	items := make([]item, 0, len(usage))
+	for _, u := range usage {
+		it := item{InboundUsage: u}
+		if n, err := h.Store.GetNode(u.NodeID); err == nil {
+			it.NodeName = n.Name
+		}
+		if in, err := h.Store.GetInbound(u.InboundID); err == nil {
+			it.Remark = in.Remark
+		} else {
+			it.Deleted = true
+		}
+		items = append(items, it)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"daily": out, "byInbound": items})
 }
 
 // serveSubscription 输出订阅内容。令牌无效或订阅停用时一律 404，不暴露原因。

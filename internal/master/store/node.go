@@ -28,6 +28,9 @@ type Node struct {
 	AppliedRev   int64             `json:"appliedRev"`
 	AppliedHash  string            `json:"appliedHash"`
 	SyncError    string            `json:"syncError"`
+	LastSeq      int64             `json:"-"`
+	NetResetDay  int               `json:"netResetDay"`   // 服务器流量计费周期的重置日（1-28）
+	NetQuota     int64             `json:"netQuotaBytes"` // 服务器每周期流量配额，0 表示不限
 
 	secretHash string
 }
@@ -36,7 +39,8 @@ type Node struct {
 func (n *Node) SecretHash() string { return n.secretHash }
 
 const nodeColumns = `id, name, remark, sort, public_host, secret_hash, agent_version, xray_version,
-	capabilities_json, host_info_json, last_ip, last_seen_at, created_at, desired_rev, applied_rev, applied_hash, sync_error`
+	capabilities_json, host_info_json, last_ip, last_seen_at, created_at, desired_rev, applied_rev, applied_hash, sync_error,
+	last_seq, net_reset_day, net_quota_bytes`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -45,7 +49,7 @@ func scanNode(r rowScanner) (*Node, error) {
 	var caps, host string
 	if err := r.Scan(&n.ID, &n.Name, &n.Remark, &n.Sort, &n.PublicHost, &n.secretHash, &n.AgentVersion,
 		&n.XrayVersion, &caps, &host, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.DesiredRev, &n.AppliedRev,
-		&n.AppliedHash, &n.SyncError); err != nil {
+		&n.AppliedHash, &n.SyncError, &n.LastSeq, &n.NetResetDay, &n.NetQuota); err != nil {
 		return nil, err
 	}
 	n.Enrolled = n.secretHash != ""
@@ -95,8 +99,9 @@ func (s *Store) CreateNode(name, remark, publicHost string) (int64, error) {
 }
 
 // UpdateNode 更新服务器的可编辑字段。
-func (s *Store) UpdateNode(id int64, name, remark, publicHost string) error {
-	return s.execOne("UPDATE nodes SET name = ?, remark = ?, public_host = ? WHERE id = ?", name, remark, publicHost, id)
+func (s *Store) UpdateNode(id int64, name, remark, publicHost string, netResetDay int, netQuota int64) error {
+	return s.execOne("UPDATE nodes SET name = ?, remark = ?, public_host = ?, net_reset_day = ?, net_quota_bytes = ? WHERE id = ?",
+		name, remark, publicHost, netResetDay, netQuota, id)
 }
 
 // DeleteNode 删除服务器。

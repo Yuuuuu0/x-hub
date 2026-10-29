@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Yuuuuu0/x-hub/internal/master/accounting"
 	"github.com/Yuuuuu0/x-hub/internal/master/auth"
 	"github.com/Yuuuuu0/x-hub/internal/master/hub"
 	"github.com/Yuuuuu0/x-hub/internal/master/server"
@@ -31,6 +32,7 @@ type Handler struct {
 	Server        *server.Server
 	Hub           *hub.Hub
 	Syncer        *syncer.Syncer
+	Accounting    *accounting.Service
 	Releases      *xrayrel.Service
 	Log           *slog.Logger
 	Web           fs.FS  // 前端构建产物根目录
@@ -71,6 +73,9 @@ func (h *Handler) Init() {
 	m.HandleFunc("DELETE /api/subscriptions/{id}", h.authed(h.deleteSubscription))
 	m.HandleFunc("POST /api/subscriptions/{id}/reset-credentials", h.authed(h.resetSubscriptionCredentials))
 	m.HandleFunc("POST /api/subscriptions/{id}/reset-token", h.authed(h.resetSubscriptionToken))
+	m.HandleFunc("POST /api/subscriptions/{id}/reset-traffic", h.authed(h.resetSubscriptionTraffic))
+	m.HandleFunc("GET /api/subscriptions/{id}/traffic", h.authed(h.subscriptionTraffic))
+	m.HandleFunc("PUT /api/settings/stats", h.authed(h.putStatsSettings))
 	m.HandleFunc("PUT /api/settings/subscription", h.authed(h.putSubscriptionSettings))
 	m.HandleFunc("POST /api/tools/x25519", h.authed(h.x25519))
 	m.HandleFunc("GET /api/tools/short-id", h.authed(h.shortID))

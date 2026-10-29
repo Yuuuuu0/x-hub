@@ -29,6 +29,8 @@ type Subscription struct {
 	ExpireAt    int64  `json:"expireAt"`
 	UsedUp      int64  `json:"usedUp"`
 	UsedDown    int64  `json:"usedDown"`
+	ResetDay    int    `json:"resetDay"`      // 每月流量重置日（1-28），0 表示不自动重置
+	PeriodStart int64  `json:"periodStartAt"` // 当前计量周期起点
 	CreatedAt   int64  `json:"createdAt"`
 }
 
@@ -36,12 +38,12 @@ type Subscription struct {
 func (s *Subscription) Active() bool { return s.Enabled && s.State == SubActive }
 
 const subColumns = `id, name, note, sort, token, secret, uuid, enabled, state, all_inbounds, limit_bytes, expire_at,
-	used_up, used_down, created_at`
+	used_up, used_down, reset_day, period_start_at, created_at`
 
 func scanSub(r rowScanner) (*Subscription, error) {
 	var s Subscription
 	err := r.Scan(&s.ID, &s.Name, &s.Note, &s.Sort, &s.Token, &s.Secret, &s.UUID, &s.Enabled, &s.State, &s.AllInbounds,
-		&s.LimitBytes, &s.ExpireAt, &s.UsedUp, &s.UsedDown, &s.CreatedAt)
+		&s.LimitBytes, &s.ExpireAt, &s.UsedUp, &s.UsedDown, &s.ResetDay, &s.PeriodStart, &s.CreatedAt)
 	return &s, err
 }
 
@@ -140,9 +142,10 @@ func (s *Store) CountSubscriptions() (int, error) {
 
 // CreateSubscription 新建订阅，返回新 ID。
 func (s *Store) CreateSubscription(sub *Subscription) (int64, error) {
-	res, err := s.db.Exec(`INSERT INTO subscriptions (name, note, token, secret, uuid, enabled, state, all_inbounds, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sub.Name, sub.Note, sub.Token, sub.Secret, sub.UUID, sub.Enabled, SubActive, sub.AllInbounds, time.Now().Unix())
+	now := time.Now().Unix()
+	res, err := s.db.Exec(`INSERT INTO subscriptions (name, note, token, secret, uuid, enabled, state, all_inbounds, period_start_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sub.Name, sub.Note, sub.Token, sub.Secret, sub.UUID, sub.Enabled, SubActive, sub.AllInbounds, now, now)
 	if err != nil {
 		return 0, err
 	}
@@ -152,6 +155,23 @@ func (s *Store) CreateSubscription(sub *Subscription) (int64, error) {
 // UpdateSubscription 更新名称、备注与启用状态。
 func (s *Store) UpdateSubscription(id int64, name, note string, enabled bool) error {
 	return s.execOne("UPDATE subscriptions SET name = ?, note = ?, enabled = ? WHERE id = ?", name, note, enabled, id)
+}
+
+// UpdateSubscriptionQuota 更新流量上限、到期时间与每月重置日。重置日变化时以当前时刻开始新周期但保留已用量。
+func (s *Store) UpdateSubscriptionQuota(id, limitBytes, expireAt int64, resetDay int) error {
+	return s.execOne(`UPDATE subscriptions SET limit_bytes = ?, expire_at = ?,
+		period_start_at = CASE WHEN reset_day != ? THEN ? ELSE period_start_at END, reset_day = ? WHERE id = ?`,
+		limitBytes, expireAt, resetDay, time.Now().Unix(), resetDay, id)
+}
+
+// ResetSubscriptionUsage 清零当前周期用量，并以 start 作为新周期起点。
+func (s *Store) ResetSubscriptionUsage(id, start int64) error {
+	return s.execOne("UPDATE subscriptions SET used_up = 0, used_down = 0, period_start_at = ? WHERE id = ?", start, id)
+}
+
+// SetSubscriptionState 更新订阅状态。
+func (s *Store) SetSubscriptionState(id int64, state string) error {
+	return s.execOne("UPDATE subscriptions SET state = ? WHERE id = ?", state, id)
 }
 
 // ResetSubscriptionCredentials 更换凭据根密钥与 UUID，旧凭据随之失效。

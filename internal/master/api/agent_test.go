@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/Yuuuuu0/x-hub/internal/master/accounting"
 	"github.com/Yuuuuu0/x-hub/internal/master/auth"
 	"github.com/Yuuuuu0/x-hub/internal/master/hub"
 	"github.com/Yuuuuu0/x-hub/internal/master/server"
@@ -46,8 +47,10 @@ func newTestHandler(t *testing.T) *Handler {
 		Log:      log,
 		Web:      fs.FS(fstest.MapFS{"index.html": {Data: []byte(`<base href="/">`)}}),
 	}
-	h.Hub = hub.New(st, log, h.Endpoint, nil)
+	h.Hub = hub.New(st, log, hub.Hooks{Endpoint: h.Endpoint})
 	h.Syncer = syncer.New(st, h.Hub, log)
+	h.Accounting = accounting.New(st, cfg, h.Syncer, log)
+	h.Hub.SetTrafficHooks(h.Accounting.LastSeq, h.Accounting.Ingest)
 	h.Init()
 	return h
 }

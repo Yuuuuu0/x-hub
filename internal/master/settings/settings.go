@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 	"github.com/Yuuuuu0/x-hub/internal/shared/xraycap"
@@ -25,6 +26,7 @@ const (
 	keyXray         = "xray"
 	keySecurity     = "security"
 	keySubscription = "subscription"
+	keyStats        = "stats"
 )
 
 // DefaultListen 为默认监听地址。2096 位于 Cloudflare 支持代理的 HTTPS 端口列表中。
@@ -59,6 +61,12 @@ type Subscription struct {
 	NameTemplate string `json:"nameTemplate"` // 节点名称模板，支持 {node} {remark} {port}
 }
 
+// Stats 为流量统计设置。
+type Stats struct {
+	Timezone      string `json:"timezone"`      // 按天汇总、每月重置与图表使用的时区
+	RetentionDays int    `json:"retentionDays"` // 小时明细保留天数，之后汇总为天
+}
+
 // DefaultNameTemplate 为默认节点名称模板。
 const DefaultNameTemplate = "{node} {remark}"
 
@@ -72,6 +80,8 @@ type Service struct {
 	xray     Xray
 	security Security
 	sub      Subscription
+	stats    Stats
+	loc      *time.Location
 }
 
 // Load 从数据库加载全部设置，缺失项写入默认值。firstRun 表示访问设置此前不存在。
@@ -106,7 +116,46 @@ func Load(st *store.Store, newPanelPath func() string) (svc *Service, firstRun b
 			return nil, false, err
 		}
 	}
+	svc.stats = Stats{Timezone: "Asia/Shanghai", RetentionDays: 90}
+	if _, err := st.GetSetting(keyStats, &svc.stats); err != nil {
+		return nil, false, err
+	}
+	if svc.loc, err = time.LoadLocation(svc.stats.Timezone); err != nil {
+		svc.loc = time.UTC
+	}
 	return svc, firstRun, nil
+}
+
+// Stats 返回统计设置。
+func (s *Service) Stats() Stats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stats
+}
+
+// Location 返回统计时区。
+func (s *Service) Location() *time.Location {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loc
+}
+
+// SaveStats 校验并保存统计设置。
+func (s *Service) SaveStats(st Stats) error {
+	loc, err := time.LoadLocation(strings.TrimSpace(st.Timezone))
+	if err != nil || st.Timezone == "" {
+		return fmt.Errorf("无效的时区：%s", st.Timezone)
+	}
+	if st.RetentionDays < 7 || st.RetentionDays > 3650 {
+		return fmt.Errorf("明细保留天数需在 7 到 3650 之间")
+	}
+	if err := s.store.PutSetting(keyStats, st); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.stats, s.loc = st, loc
+	s.mu.Unlock()
+	return nil
 }
 
 // Access 返回访问设置副本。

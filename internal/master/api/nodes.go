@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Yuuuuu0/x-hub/internal/master/accounting"
 	"github.com/Yuuuuu0/x-hub/internal/master/auth"
 	"github.com/Yuuuuu0/x-hub/internal/master/hub"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
@@ -20,11 +21,18 @@ import (
 
 const enrollTokenTTL = time.Hour
 
-// nodeView 为服务器列表项：持久化字段 + 内存运行时状态 + 配置同步状态。
+// nodeView 为服务器列表项：持久化字段 + 内存运行时状态 + 配置同步状态 + 当前计费周期流量。
 type nodeView struct {
 	*store.Node
 	Runtime   hub.RuntimeState `json:"runtime"`
 	SyncState string           `json:"syncState"`
+	NetPeriod netPeriod        `json:"netPeriod"`
+}
+
+type netPeriod struct {
+	Start int64 `json:"start"`
+	Rx    int64 `json:"rx"`
+	Tx    int64 `json:"tx"`
 }
 
 func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
@@ -34,16 +42,22 @@ func (h *Handler) listNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]nodeView, 0, len(nodes))
+	now, loc := time.Now(), h.Settings.Location()
 	for _, n := range nodes {
-		out = append(out, nodeView{Node: n, Runtime: h.Hub.State(n.ID), SyncState: h.Syncer.State(n)})
+		v := nodeView{Node: n, Runtime: h.Hub.State(n.ID), SyncState: h.Syncer.State(n)}
+		v.NetPeriod.Start = accounting.PeriodStart(n.NetResetDay, now, loc).Unix()
+		v.NetPeriod.Rx, v.NetPeriod.Tx, _ = h.Store.NodeTrafficSince(n.ID, v.NetPeriod.Start)
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": out, "masterVersion": version.Version})
 }
 
 type nodeInput struct {
-	Name       string `json:"name"`
-	Remark     string `json:"remark"`
-	PublicHost string `json:"publicHost"`
+	Name        string `json:"name"`
+	Remark      string `json:"remark"`
+	PublicHost  string `json:"publicHost"`
+	NetResetDay int    `json:"netResetDay"`
+	NetQuota    int64  `json:"netQuotaBytes"`
 }
 
 func (in *nodeInput) validate() error {
@@ -55,6 +69,15 @@ func (in *nodeInput) validate() error {
 	}
 	if utf8.RuneCountInString(in.Remark) > 200 {
 		return errors.New("备注不能超过 200 字")
+	}
+	if in.NetResetDay == 0 {
+		in.NetResetDay = 1
+	}
+	if in.NetResetDay < 1 || in.NetResetDay > 28 {
+		return errors.New("流量重置日需在 1 到 28 之间")
+	}
+	if in.NetQuota < 0 {
+		return errors.New("流量配额不能为负数")
 	}
 	// 恰好一个冒号意味着带了端口；IPv6 地址含多个冒号，允许。
 	if strings.ContainsAny(in.PublicHost, "/@ []") || strings.Count(in.PublicHost, ":") == 1 {
@@ -74,6 +97,9 @@ func (h *Handler) createNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := h.Store.CreateNode(in.Name, in.Remark, in.PublicHost)
+	if err == nil {
+		err = h.Store.UpdateNode(id, in.Name, in.Remark, in.PublicHost, in.NetResetDay, in.NetQuota)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -96,7 +122,7 @@ func (h *Handler) updateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.Store.UpdateNode(id, in.Name, in.Remark, in.PublicHost); err != nil {
+	if err := h.Store.UpdateNode(id, in.Name, in.Remark, in.PublicHost, in.NetResetDay, in.NetQuota); err != nil {
 		writeStoreError(w, err)
 		return
 	}

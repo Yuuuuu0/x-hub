@@ -172,6 +172,12 @@ func ClientEmail(subID, inboundID int64) string {
 	return fmt.Sprintf("s%d.i%d", subID, inboundID)
 }
 
+// ParseClientEmail 解析 ClientEmail 生成的统计标识。
+func ParseClientEmail(email string) (subID, inboundID int64, ok bool) {
+	n, err := fmt.Sscanf(email, "s%d.i%d", &subID, &inboundID)
+	return subID, inboundID, err == nil && n == 2 && email == ClientEmail(subID, inboundID)
+}
+
 // InboundTag 返回入站在 Xray 配置中的 tag。
 func InboundTag(inboundID int64) string {
 	return fmt.Sprintf("in-%d", inboundID)

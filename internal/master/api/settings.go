@@ -15,6 +15,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		"xray":         h.Settings.Xray(),
 		"security":     h.Settings.Security(),
 		"subscription": h.Settings.Subscription(),
+		"stats":        h.Settings.Stats(),
 	}
 	if fp, err := h.Certs.SelfSigned(); err == nil {
 		out["selfSignedFingerprint"] = fp
@@ -109,4 +110,17 @@ func (h *Handler) putSubscriptionSettings(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, h.Settings.Subscription())
+}
+
+func (h *Handler) putStatsSettings(w http.ResponseWriter, r *http.Request) {
+	var s settings.Stats
+	if err := readJSON(r, &s); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.Settings.SaveStats(s); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, h.Settings.Stats())
 }
