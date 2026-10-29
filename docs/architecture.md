@@ -184,22 +184,26 @@ Inbound
 
 ### 8.1 采集与上报
 
-1. Agent 每 10s `QueryStats(reset=true)` 读取 `user>>>*>>>traffic>>>*` 增量。
-2. 增量写入本地账本（原子写文件）；同一小时合并为一个批次并分配递增 `seq`，离线期间各批次保留原小时归属。
-3. 上报 `traffic`；主控在单事务内 UPSERT `traffic_hourly`、累加订阅 `used_*`、更新 `nodes.last_seq`，`seq ≤ last_seq` 直接 ack 不入库。
-4. Agent 收到 ack 后删除对应批次。断网期间流量不丢。
-5. 网卡计数器变小（机器重启）时视为新基线，按增量上报。
+1. Agent 每 10s `QueryStats(reset=true)` 读取 `user>>>*>>>traffic>>>*` 增量，连同网卡增量按小时累计进本地账本（原子写文件）。
+2. 每 30s（以及每次连上主控时立即）把未封存的小时累计量封存为带递增 `seq` 的批次并上报 `traffic`；离线期间每小时只产生一个批次。
+3. 主控在单事务内 UPSERT `traffic_hourly` / `node_traffic_hourly`、累加订阅当前周期 `used_*`、推进 `nodes.last_seq`，`seq ≤ last_seq` 的重传批次跳过，随后回复 `ack{seq}`；`welcome` 也携带 `ackSeq`，处理 ack 丢失与被控端账本被清空的情况。
+4. Agent 收到 ack 后删除对应批次。Xray 停止 / 重启前先采集一次，避免内存计数丢失。
+5. 网卡计数器变小（机器重启）时以当前值为增量。
+
+已实测（v26.7.28）：主控停机期间代理正常工作，期间流量在重连后完整入库；下载后立即重启 Xray 不丢计数；经 Mihomo 下载 21MB 统计偏差 +0.15%。
 
 ### 8.2 额度控制
 
-- 流量入库后检查受影响订阅；每分钟扫描一次到期。
-- 超额 / 到期 → 更新 `state` → 对相关服务器下发 `users.remove`。
-- 支持按月重置（`reset_day`），重置时清零当前周期用量并恢复 `state`。
+- 流量入库后检查受影响订阅；每分钟扫描一次到期与周期重置。
+- 超额 / 到期 → 更新 `state` → 触发同步，被控端经 gRPC 在线移除该订阅的用户（不重启）。
+- 超额判定依赖流量上报，存在约 10~40 秒的延迟，期间仍可能超出少量流量。
+- 支持按月重置（`reset_day`，1~28，按统计时区的当日 00:00），重置时清零当前周期用量并恢复 `state`；也可手动清零。修改重置日时以当前时刻开始新周期但保留已用量。
 
 ### 8.3 在线 IP / 设备数
 
 - 仅在 Xray 支持 `online_stats` 能力的节点启用：配置开启 `statsUserOnline`，心跳携带 `email → [ip]` 快照。
-- 主控在内存中按订阅取并集，展示在线 IP 与去重设备数，并记录每小时峰值。
+- Xray 按活跃连接引用计数，连接断开即移除，且忽略 127.0.0.1 / ::1 来源。
+- 主控在内存中按订阅取并集，展示当前在线 IP 与去重设备数；不落库。
 - 只展示，不做限制。
 
 ## 9. Xray 版本与能力
@@ -259,7 +263,7 @@ var minVersion = map[Feature]Version{ /* M1 对照官方 changelog 填写 */ }
 | 访问 | 监听地址与端口、面板路径、public_url、TLS 模式、证书/私钥路径、可信代理 |
 | 订阅 | 订阅路径、更新间隔、节点命名模板 |
 | Xray | 默认安装版本、版本上限、全局路由开关 |
-| 统计 | 时区、明细保留天数 |
+| 统计 | 时区（默认 Asia/Shanghai）、小时明细保留天数（默认 90） |
 | 安全 | 管理员账号密码、TOTP、会话时长 |
 
 ### 10.5 应急命令
@@ -343,13 +347,13 @@ subscription_inbounds(sub_id, inbound_id, PK(sub_id, inbound_id))  -- 双向 FK 
 traffic_hourly(hour, sub_id, inbound_id, node_id, up, down, PK(hour, sub_id, inbound_id))
 traffic_daily (day,  sub_id, inbound_id, node_id, up, down, PK(day,  sub_id, inbound_id))
 node_traffic_hourly(hour, node_id, rx, tx, PK(hour, node_id))
-online_peak_hourly(hour, sub_id, peak_ips, PK(hour, sub_id))
 ```
 
 - 流量表不建外键、冗余 `node_id`：删除服务器或入站后历史保留，前端显示"已删除"。
 - 当前周期用量读 `subscriptions.used_*`；历史从流量表聚合。
 - 小时明细默认保留 90 天，之后按统计时区汇总入 `traffic_daily`。
-- 实时指标与在线 IP 明细只在内存。
+- 实时指标与在线 IP 只在内存。
+- `nodes` 另有 `last_seq`（已确认的流量批次序号）、`net_reset_day` / `net_quota_bytes`（服务器流量计费周期与配额）。
 
 ## 13. 安全要点
 
