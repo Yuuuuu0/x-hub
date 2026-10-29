@@ -18,11 +18,10 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/sub"
 )
 
-// outNode 为订阅输出中的一个节点：渲染用的节点定义，以及 Base64 链接与 sing-box 出站（为空表示该格式不输出）。
+// outNode 为订阅输出中的一个节点：渲染用的节点定义，以及 Base64 链接（为空表示不输出到 Base64）。
 type outNode struct {
 	routing.Node
-	Link    string
-	SingBox map[string]any
+	Link string
 }
 
 // subscriptionNodes 收集订阅可用的全部节点：自有节点在前，随后为可见且启用的外部节点。
@@ -36,7 +35,7 @@ func (h *Handler) subscriptionNodes(s *store.Subscription) ([]outNode, []string,
 	taken := map[string]bool{}
 	byInbound := map[int64]string{}
 	for _, n := range own {
-		out = append(out, outNode{Node: routing.Node{Name: n.Name, Own: true, Mihomo: n.Mihomo}, Link: n.Link, SingBox: n.SingBox})
+		out = append(out, outNode{Node: routing.Node{Name: n.Name, Own: true, Mihomo: n.Mihomo, SingBox: n.SingBox}, Link: n.Link})
 		taken[n.Name] = true
 		byInbound[n.InboundID] = n.Name
 	}
@@ -69,8 +68,9 @@ func (h *Handler) subscriptionNodes(s *store.Subscription) ([]outNode, []string,
 				name = fmt.Sprintf("%s%s %d", src.Prefix, p.Name, i)
 			}
 			taken[name] = true
+			sb, _ := external.SingBox(p.Mihomo, name)
 			out = append(out, outNode{
-				Node: routing.Node{Name: name, Mihomo: p.Mihomo, Dialer: dialer, DialerNode: dialerNode},
+				Node: routing.Node{Name: name, Mihomo: p.Mihomo, SingBox: sb, Dialer: dialer, DialerNode: dialerNode},
 				Link: p.ShareLink(name),
 			})
 		}

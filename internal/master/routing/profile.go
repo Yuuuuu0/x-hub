@@ -3,6 +3,7 @@
 package routing
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -46,12 +47,15 @@ var noResolveTypes = []string{"RULE-SET", "GEOIP", "IP-CIDR", "IP-CIDR6", "IP-AS
 
 // Profile 为一个分流方案。
 type Profile struct {
-	Groups []Group    `json:"groups"`
-	Rules  []Rule     `json:"rules"`
-	Mihomo ClientBase `json:"mihomo"`
+	Groups       []Group    `json:"groups"`
+	Rules        []Rule     `json:"rules"`
+	Mihomo       ClientBase `json:"mihomo"`
+	SingBox      ClientBase `json:"singbox"`
+	Shadowrocket ClientBase `json:"shadowrocket"`
 }
 
 // ClientBase 为某客户端的基础配置原文（DNS、TUN、嗅探、端口等），不含节点、分组、规则集与规则。
+// sing-box 与 Shadowrocket 的基础配置为空时分别使用 DefaultSingBoxBase 与 DefaultShadowrocketBase。
 type ClientBase struct {
 	Base string `json:"base"`
 }
@@ -195,6 +199,29 @@ func (p *Profile) Validate(ruleSets map[string]bool) []string {
 			}
 		}
 	}
+	if strings.TrimSpace(p.SingBox.Base) != "" {
+		var base map[string]any
+		if err := json.Unmarshal([]byte(p.SingBox.Base), &base); err != nil {
+			add("sing-box 基础配置不是合法的 JSON：%v", err)
+		}
+		if _, ok := base["outbounds"]; ok {
+			add("sing-box 基础配置中不应包含 outbounds，这部分由方案的分组与节点生成")
+		}
+		if route, ok := base["route"].(map[string]any); ok {
+			for _, k := range []string{"rule_set", "final"} {
+				if _, ok := route[k]; ok {
+					add("sing-box 基础配置的 route 中不应包含 %s，这部分由方案生成", k)
+				}
+			}
+		}
+	}
+	for _, line := range strings.Split(p.Shadowrocket.Base, "\n") {
+		for _, sec := range managedShadowrocketSections {
+			if strings.EqualFold(strings.TrimSpace(line), sec) {
+				add("Shadowrocket 基础配置中不应包含 %s，这部分由方案生成", sec)
+			}
+		}
+	}
 	return issues
 }
 
@@ -269,7 +296,9 @@ func DefaultProfile() *Profile {
 			{Type: "GEOIP", Value: "CN", Target: "DIRECT"},
 			{Type: "MATCH", Target: "节点选择"},
 		},
-		Mihomo: ClientBase{Base: defaultMihomoBase},
+		Mihomo:       ClientBase{Base: defaultMihomoBase},
+		SingBox:      ClientBase{Base: DefaultSingBoxBase},
+		Shadowrocket: ClientBase{Base: DefaultShadowrocketBase},
 	}
 }
 

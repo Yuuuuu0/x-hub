@@ -42,6 +42,7 @@ type Handler struct {
 	InstallScript []byte
 
 	limiter  *auth.LoginLimiter
+	ruleSets ruleSetCache
 	apiMux   *http.ServeMux
 	agentMux *http.ServeMux
 }
@@ -91,6 +92,7 @@ func (h *Handler) Init() {
 	m.HandleFunc("POST /api/profiles", h.authed(h.createProfile))
 	m.HandleFunc("POST /api/profiles/import", h.authed(h.importProfile))
 	m.HandleFunc("POST /api/profiles/preview", h.authed(h.previewProfile))
+	m.HandleFunc("GET /api/profiles/defaults", h.authed(h.profileDefaults))
 	m.HandleFunc("GET /api/profiles/{id}", h.authed(h.getProfile))
 	m.HandleFunc("PUT /api/profiles/{id}", h.authed(h.updateProfile))
 	m.HandleFunc("DELETE /api/profiles/{id}", h.authed(h.deleteProfile))

@@ -365,21 +365,28 @@ func (h *Handler) serveSubscription(w http.ResponseWriter, r *http.Request, toke
 	format := sub.DetectFormat(r.UserAgent(), r.URL.Query().Get("format"))
 	var body []byte
 	ctype := "text/yaml; charset=utf-8"
-	if format == sub.FormatMihomo {
-		p := h.subscriptionProfile(s)
-		if p == nil {
-			p = routing.BuiltinProfile()
-		}
+	p := h.subscriptionProfile(s)
+	if p == nil {
+		p = routing.BuiltinProfile()
+	}
+	switch format {
+	case sub.FormatMihomo:
 		body, _, err = h.renderMihomoProfile(p, nodes)
-	} else {
-		// Base64 与 sing-box 无法表达链式代理，带前置的外部节点不输出；外部节点暂不输出到 sing-box。
-		list := make([]sub.Node, 0, len(nodes))
+	case sub.FormatSingBox:
+		body, _, err = h.renderSingBoxProfile(p, nodes)
+		ctype = "application/json; charset=utf-8"
+	case sub.FormatShadowrocket:
+		body, _, err = h.renderShadowrocketProfile(p, nodes)
+		ctype = "text/plain; charset=utf-8"
+	default:
+		// Base64 无法表达链式代理，带前置的外部节点不输出。
+		links := make([]string, 0, len(nodes))
 		for _, n := range nodes {
-			if n.Dialer == "" {
-				list = append(list, sub.Node{Name: n.Name, Link: n.Link, SingBox: n.SingBox})
+			if n.Dialer == "" && n.Link != "" {
+				links = append(links, n.Link)
 			}
 		}
-		body, ctype, err = sub.Render(format, list)
+		body, ctype = sub.Base64(links), "text/plain; charset=utf-8"
 	}
 	if err != nil {
 		h.Log.Warn("render subscription", "sub", s.ID, "format", format, "err", err)
@@ -391,7 +398,11 @@ func (h *Handler) serveSubscription(w http.ResponseWriter, r *http.Request, toke
 	hdr.Set("Cache-Control", "no-store")
 	hdr.Set("Subscription-Userinfo", sub.UserInfo(s))
 	hdr.Set("Profile-Update-Interval", strconv.Itoa(cfg.UpdateHours))
-	hdr.Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape("x-hub-"+s.Name))
+	filename := "x-hub-" + s.Name
+	if format == sub.FormatShadowrocket {
+		filename += ".conf" // 便于客户端识别为配置文件
+	}
+	hdr.Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(filename))
 	h.Log.Info("subscription fetched", "sub", s.ID, "format", format, "nodes", len(nodes), "ip", h.clientIP(r))
 	w.Write(body)
 }

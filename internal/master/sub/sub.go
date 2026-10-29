@@ -1,9 +1,8 @@
-// Package sub 生成订阅内容：按订阅的入站范围收集自有节点，并渲染为通用 Base64 或 sing-box 配置。
+// Package sub 生成订阅内容：按订阅的入站范围收集自有节点，并生成通用 Base64 订阅；Mihomo 与 sing-box 由分流方案渲染。
 package sub
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -19,6 +18,9 @@ const (
 	FormatBase64  Format = "base64"  // v2rayN / v2rayNG / Shadowrocket / NekoBox 等
 	FormatMihomo  Format = "mihomo"  // Mihomo（Clash Meta）/ Clash Verge / Stash 等
 	FormatSingBox Format = "singbox" // sing-box 官方客户端（SFA / SFI / SFM）
+	// FormatShadowrocket 为 Shadowrocket 配置（分组与规则），只能显式指定：Shadowrocket 拉取订阅与配置时
+	// User-Agent 相同，节点仍由通用订阅提供。
+	FormatShadowrocket Format = "shadowrocket"
 )
 
 // 识别客户端的 User-Agent 关键字（小写）。sing-box 优先，避免被泛化的关键字误判。
@@ -36,6 +38,8 @@ func DetectFormat(userAgent, override string) Format {
 		return FormatMihomo
 	case FormatSingBox, "sing-box":
 		return FormatSingBox
+	case FormatShadowrocket:
+		return FormatShadowrocket
 	}
 	ua := strings.ToLower(userAgent)
 	for _, k := range singboxUAKeywords {
@@ -131,87 +135,9 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string) ([]Nod
 	return out, nil
 }
 
-// Render 按格式渲染 Base64 或 sing-box 订阅内容，返回内容与 Content-Type。Mihomo 由分流方案渲染。
-func Render(f Format, nodes []Node) ([]byte, string, error) {
-	if f == FormatSingBox {
-		b, err := renderSingBox(nodes)
-		return b, "application/json; charset=utf-8", err
-	}
-	links := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		if n.Link != "" {
-			links = append(links, n.Link)
-		}
-	}
-	return []byte(base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))), "text/plain; charset=utf-8", nil
-}
-
-const (
-	groupSelect = "节点选择"
-	groupAuto   = "自动选择"
-)
-
-// renderSingBox 生成 sing-box 配置（1.12+ 格式）：TUN 与本地 mixed 入站、手动 / 自动选择、
-// 局域网与国内直连。sing-box 不支持的节点（XHTTP）不输出。
-func renderSingBox(nodes []Node) ([]byte, error) {
-	names := []string{}
-	var outbounds []any
-	for _, n := range nodes {
-		if n.SingBox != nil {
-			outbounds = append(outbounds, n.SingBox)
-			names = append(names, n.Name)
-		}
-	}
-	selectList := []string{}
-	if len(names) > 0 {
-		selectList = append(selectList, groupAuto)
-	}
-	selectList = append(append(selectList, names...), "direct")
-	groups := []any{map[string]any{"type": "selector", "tag": groupSelect, "outbounds": selectList}}
-	if len(names) > 0 {
-		groups = append(groups, map[string]any{
-			"type": "urltest", "tag": groupAuto, "outbounds": names,
-			"url": "https://www.gstatic.com/generate_204", "interval": "5m", "tolerance": 50,
-		})
-	}
-	outbounds = append(append(groups, outbounds...), map[string]any{"type": "direct", "tag": "direct"})
-	// 不设置 download_detour：它在 1.14 被弃用，而替代的 http_client 在 1.12 / 1.13 上无法解析；
-	// 留空时规则集经默认出站（route.final，即节点选择）下载，各版本均可用。
-	ruleSet := func(tag, repo string) map[string]any {
-		return map[string]any{
-			"type": "remote", "tag": tag, "format": "binary",
-			"url": "https://raw.githubusercontent.com/SagerNet/" + repo + "/rule-set/" + tag + ".srs",
-		}
-	}
-	cfg := map[string]any{
-		"log": map[string]any{"level": "warn", "timestamp": true},
-		"dns": map[string]any{
-			"servers": []any{
-				map[string]any{"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": groupSelect},
-				map[string]any{"type": "udp", "tag": "local", "server": "223.5.5.5"},
-			},
-			"rules": []any{map[string]any{"rule_set": "geosite-cn", "server": "local"}},
-			"final": "remote",
-		},
-		"inbounds": []any{
-			map[string]any{"type": "tun", "tag": "tun-in", "address": []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"}, "auto_route": true, "strict_route": true},
-			map[string]any{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080},
-		},
-		"outbounds": outbounds,
-		"route": map[string]any{
-			"rules": []any{
-				map[string]any{"action": "sniff"},
-				map[string]any{"protocol": "dns", "action": "hijack-dns"},
-				map[string]any{"ip_is_private": true, "outbound": "direct"},
-				map[string]any{"rule_set": []string{"geosite-cn", "geoip-cn"}, "outbound": "direct"},
-			},
-			"rule_set":                []any{ruleSet("geosite-cn", "sing-geosite"), ruleSet("geoip-cn", "sing-geoip")},
-			"final":                   groupSelect,
-			"auto_detect_interface":   true,
-			"default_domain_resolver": "local",
-		},
-	}
-	return json.MarshalIndent(cfg, "", "  ")
+// Base64 生成通用订阅内容：分享链接每行一条，整体 Base64 编码。
+func Base64(links []string) []byte {
+	return []byte(base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n"))))
 }
 
 // UserInfo 生成 subscription-userinfo 响应头，客户端据此展示用量、总量与到期时间。

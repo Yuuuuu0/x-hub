@@ -25,20 +25,25 @@ func (h *Handler) ruleSetRefs() (map[string]routing.RuleSetRef, error) {
 	for _, rs := range list {
 		ref := routing.RuleSetRef{Name: rs.Name, Behavior: rs.Behavior, URL: rs.URL, Format: rs.Format, Interval: rs.Interval}
 		if rs.Source == routing.SetHosted {
-			ref.URL, ref.Format = h.hostedRuleURL(rs.Name), ""
+			ref.URL, ref.Format = h.hostedRuleURL(rs.Name, ".yaml"), ""
+		}
+		if rs.Format != "mrs" {
+			ref.SingBoxURL = h.hostedRuleURL(rs.Name, ".json")
+			ref.ShadowrocketURL = h.hostedRuleURL(rs.Name, ".list")
 		}
 		out[rs.Name] = ref
 	}
 	return out, nil
 }
 
-// hostedRuleURL 返回托管规则集的 Mihomo 下载地址，未设置公开访问地址时为空。
-func (h *Handler) hostedRuleURL(name string) string {
+// hostedRuleURL 返回主控提供的规则集地址：.yaml 为托管规则集的 Mihomo 格式；.json / .list 为转换后的
+// sing-box / Shadowrocket 格式（托管与外部规则集均可）。未设置公开访问地址时为空。
+func (h *Handler) hostedRuleURL(name, ext string) string {
 	base := h.Settings.Access().PublicURL
 	if base == "" {
 		return ""
 	}
-	return base + "/" + h.Settings.Subscription().Path + "/rules/" + h.Settings.RulesToken() + "/" + url.PathEscape(name) + ".yaml"
+	return base + "/" + h.Settings.Subscription().Path + "/rules/" + h.Settings.RulesToken() + "/" + url.PathEscape(name) + ext
 }
 
 func (h *Handler) ruleSetNames() (map[string]bool, error) {
@@ -123,6 +128,11 @@ func (in *profileInput) validate() error {
 // writeIssues 以 400 返回方案校验问题列表。
 func writeIssues(w http.ResponseWriter, issues []string) {
 	writeJSON(w, http.StatusBadRequest, map[string]any{"error": "方案有 " + fmt.Sprint(len(issues)) + " 处问题：" + issues[0], "issues": issues})
+}
+
+// profileDefaults 返回各客户端基础配置的默认模板，供编辑器填入。
+func (h *Handler) profileDefaults(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"singbox": routing.DefaultSingBoxBase, "shadowrocket": routing.DefaultShadowrocketBase})
 }
 
 // createProfile 新建方案；未提供内容时以默认方案为起点。
@@ -288,6 +298,7 @@ func (h *Handler) importRuleSet(set routing.ImportedSet) (string, bool, error) {
 func (h *Handler) previewProfile(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		SubscriptionID int64           `json:"subscriptionId"`
+		Client         string          `json:"client"` // mihomo（默认）、singbox 或 shadowrocket
 		Spec           json.RawMessage `json:"spec"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&in); err != nil {
@@ -303,7 +314,7 @@ func (h *Handler) previewProfile(w http.ResponseWriter, r *http.Request) {
 		issues = []string{}
 	}
 	if len(issues) > 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"issues": issues, "warnings": []string{}, "mihomo": ""})
+		writeJSON(w, http.StatusOK, map[string]any{"issues": issues, "warnings": []string{}, "config": ""})
 		return
 	}
 	s, err := h.Store.GetSubscription(in.SubscriptionID)
@@ -316,7 +327,14 @@ func (h *Handler) previewProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out, renderWarnings, err := h.renderMihomoProfile(p, nodes)
+	render := h.renderMihomoProfile
+	switch in.Client {
+	case "singbox":
+		render = h.renderSingBoxProfile
+	case "shadowrocket":
+		render = h.renderShadowrocketProfile
+	}
+	out, renderWarnings, err := render(p, nodes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -334,7 +352,7 @@ func (h *Handler) previewProfile(w http.ResponseWriter, r *http.Request) {
 		infos[i] = nodeInfo{n.Name, n.Own}
 	}
 	members, _ := p.ExpandGroups(routingNodes(nodes))
-	writeJSON(w, http.StatusOK, map[string]any{"issues": issues, "warnings": warnings, "mihomo": string(out), "nodes": infos, "members": members})
+	writeJSON(w, http.StatusOK, map[string]any{"issues": issues, "warnings": warnings, "config": string(out), "nodes": infos, "members": members})
 }
 
 // renderMihomoProfile 以订阅可用的节点渲染方案。
@@ -413,7 +431,7 @@ func (h *Handler) listRuleSets(w http.ResponseWriter, r *http.Request) {
 			v.Profiles = []string{}
 		}
 		if rs.Source == routing.SetHosted {
-			v.HostedURL, v.Rules = h.hostedRuleURL(rs.Name), len(routing.RuleLines(rs.Content))
+			v.HostedURL, v.Rules = h.hostedRuleURL(rs.Name, ".yaml"), len(routing.RuleLines(rs.Content))
 		}
 		out = append(out, v)
 	}
@@ -546,25 +564,39 @@ func writeRuleSetError(w http.ResponseWriter, err error) {
 	writeStoreError(w, err)
 }
 
-// serveHostedRuleSet 对外提供托管规则集（Mihomo YAML 格式），路径为 rules/<令牌>/<名称>.yaml。
+// serveHostedRuleSet 对外提供规则集：rules/<令牌>/<名称>.yaml 为托管规则集的 Mihomo 格式，
+// <名称>.json / <名称>.list 为 sing-box / Shadowrocket 格式。
 func (h *Handler) serveHostedRuleSet(w http.ResponseWriter, r *http.Request, rest string) {
 	token, file, ok := strings.Cut(rest, "/")
-	name, isYAML := strings.CutSuffix(file, ".yaml")
-	if !ok || !isYAML || token != h.Settings.RulesToken() {
+	if !ok || token != h.Settings.RulesToken() {
 		http.NotFound(w, r)
 		return
 	}
+	name, ext := file, ""
+	for _, e := range []string{".yaml", ".json", ".list"} {
+		if n, found := strings.CutSuffix(file, e); found {
+			name, ext = n, e
+		}
+	}
 	name, err := url.PathUnescape(name)
-	if err != nil {
+	if err != nil || ext == "" {
 		http.NotFound(w, r)
 		return
 	}
 	rs, err := h.Store.RuleSetByName(name)
-	if err != nil || rs.Source != routing.SetHosted {
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	if ext != ".yaml" {
+		h.serveConvertedRuleSet(w, r, rs, ext)
+		return
+	}
+	if rs.Source != routing.SetHosted {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(routing.HostedMihomo(rs.Content))
 }

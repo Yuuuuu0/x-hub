@@ -14,22 +14,26 @@ import (
 )
 
 // Node 为渲染时可用的一个节点。Mihomo 为可直接编码进 proxies 的节点定义：自有节点为结构体，
-// 外部节点为 map（名称以 Name 为准）。Dialer 为外部节点的前置：DialerNode 为真时是节点名，否则是分组名。
+// 外部节点为 map（名称以 Name 为准）。SingBox 为 sing-box 出站，为空表示 sing-box 不支持。
+// Dialer 为外部节点的前置：DialerNode 为真时是节点名，否则是分组名。
 type Node struct {
 	Name       string
 	Own        bool
 	Mihomo     any
+	SingBox    map[string]any
 	Dialer     string
 	DialerNode bool
 }
 
-// RuleSetRef 为渲染时规则集的下载信息。
+// RuleSetRef 为渲染时规则集的下载信息。SingBoxURL / ShadowrocketURL 为主控转换后的地址，为空表示无法转换。
 type RuleSetRef struct {
-	Name     string
-	Behavior string
-	URL      string
-	Format   string // yaml / text / mrs，为空时由 Mihomo 按默认（yaml）处理
-	Interval int
+	Name            string
+	Behavior        string
+	URL             string
+	Format          string // yaml / text / mrs，为空时由 Mihomo 按默认（yaml）处理
+	Interval        int
+	SingBoxURL      string
+	ShadowrocketURL string
 }
 
 // ExpandGroups 计算各分组的最终成员：固定成员在前，随后为按筛选条件匹配的节点（保持节点顺序）。

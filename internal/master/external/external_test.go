@@ -103,3 +103,40 @@ func TestShareLink(t *testing.T) {
 		}
 	}
 }
+
+// TestSingBox 覆盖常见节点到 sing-box 出站的转换与不支持的传输方式。
+func TestSingBox(t *testing.T) {
+	ps, _, _ := Parse(`proxies:
+  - {name: R, type: vless, server: r.com, port: 443, uuid: u1, tls: true, servername: s.com, flow: xtls-rprx-vision, client-fingerprint: chrome, reality-opts: {public-key: PK, short-id: ab}}
+  - {name: W, type: vmess, server: w.com, port: 443, uuid: u2, alterId: 0, cipher: auto, tls: true, servername: w.com, network: ws, ws-opts: {path: /x, headers: {Host: w.com}}}
+  - {name: S, type: ss, server: s.com, port: 8388, cipher: aes-128-gcm, password: pw, plugin: obfs, plugin-opts: {mode: http, host: bing.com}}
+  - {name: H, type: hysteria2, server: h.com, port: 443, password: pw, sni: h.com, obfs: salamander, obfs-password: o}
+  - {name: K, type: socks5, server: k.com, port: 1080, username: u, password: p}
+  - {name: X, type: vless, server: x.com, port: 443, uuid: u3, tls: true, network: xhttp, xhttp-opts: {path: /}}
+`)
+	got := map[string]map[string]any{}
+	for _, p := range ps {
+		if sb, ok := SingBox(p.Mihomo, p.Name); ok {
+			got[p.Name] = sb
+		}
+	}
+	if got["X"] != nil || len(got) != 5 {
+		t.Fatalf("converted: %v", got)
+	}
+	reality := got["R"]["tls"].(map[string]any)["reality"].(map[string]any)
+	if got["R"]["flow"] != "xtls-rprx-vision" || reality["public_key"] != "PK" {
+		t.Fatalf("vless: %v", got["R"])
+	}
+	if got["W"]["security"] != "aes-128-gcm" || got["W"]["transport"].(map[string]any)["type"] != "ws" {
+		t.Fatalf("vmess: %v", got["W"])
+	}
+	if got["S"]["type"] != "shadowsocks" || got["S"]["plugin_opts"] != "obfs=http;obfs-host=bing.com" {
+		t.Fatalf("ss: %v", got["S"])
+	}
+	if got["H"]["obfs"].(map[string]any)["password"] != "o" || got["H"]["tls"].(map[string]any)["server_name"] != "h.com" {
+		t.Fatalf("hysteria2: %v", got["H"])
+	}
+	if got["K"]["type"] != "socks" || got["K"]["version"] != "5" {
+		t.Fatalf("socks: %v", got["K"])
+	}
+}
