@@ -172,6 +172,7 @@ function remove(n: NodeItem) {
         @logs="open(n, 'logs')"
         @remove="remove(n)"
         @xray="(a) => xray(n, a)"
+        @synced="load"
       />
     </TransitionGroup>
 

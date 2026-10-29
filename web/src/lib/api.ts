@@ -94,6 +94,9 @@ export interface NodeItem {
   lastIp: string
   lastSeenAt: number
   createdAt: number
+  appliedRev: number
+  syncError: string
+  syncState: SyncState
   runtime: {
     online: boolean
     connectedAt: number
@@ -159,4 +162,67 @@ export async function loadSession() {
     version: s.version,
     publicUrlSet: s.publicUrlSet ?? true,
   })
+}
+
+export type SyncState = 'synced' | 'pending' | 'failed'
+
+export interface RealitySpec {
+  target: string
+  serverNames: string[]
+  privateKey: string
+  publicKey: string
+  shortIds: string[]
+  fingerprint: string
+  spiderX: string
+  minClientVer?: string
+}
+
+export interface InboundSpec {
+  network: 'tcp'
+  security: 'reality'
+  vless: { flow: string }
+  reality: RealitySpec
+  sniffing: boolean
+}
+
+export interface InboundItem {
+  id: number
+  nodeId: number
+  nodeName: string
+  remark: string
+  enabled: boolean
+  listen: string
+  port: number
+  protocol: 'vless'
+  spec: InboundSpec
+  linkHost: string
+  linkPort: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface Subscription {
+  id: number
+  name: string
+  note: string
+  token: string
+  uuid: string
+  enabled: boolean
+  state: 'active' | 'exceeded' | 'expired'
+  allInbounds: boolean
+  createdAt: number
+}
+
+export interface ShareLink {
+  subscriptionId: number
+  subscriptionName: string
+  link: string
+}
+
+export interface ProbeTargetResult {
+  ok: boolean
+  tls13: boolean
+  h2: boolean
+  latencyMs: number
+  error?: string
 }

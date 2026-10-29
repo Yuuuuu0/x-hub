@@ -1,0 +1,372 @@
+<script setup lang="ts">
+import { computed, reactive, ref, watch } from 'vue'
+import { message } from 'ant-design-vue'
+import { Dice5, KeyRound, Plus, Radar } from 'lucide-vue-next'
+import { api, type InboundItem, type InboundSpec, type NodeItem, type ProbeTargetResult } from '../lib/api'
+
+// 新建或编辑入站。当前仅 VLESS + TCP + Reality（可选 Vision）。
+const props = defineProps<{ inbound: InboundItem | null; nodes: NodeItem[]; presetNodeId?: number }>()
+const open = defineModel<boolean>('open', { required: true })
+const emit = defineEmits<{ saved: [] }>()
+
+// 常用 Reality 目标网站：支持 TLS 1.3 / H2 的大型站点，实际可用性以「检测」结果为准。
+// 不包含 Xray 明确警告的 apple / icloud / microsoft 类域名。
+const TARGETS = [
+  'dl.google.com', 'www.amazon.com', 'addons.mozilla.org', 'www.lovelive-anime.jp',
+  'www.nvidia.com', 'www.amd.com', 'www.cisco.com', 'www.yahoo.com',
+]
+
+// 与 Xray 的告警规则一致：这些 SNI 会增加服务器 IP 被封锁的概率。
+function riskySNI(sn: string) {
+  const s = sn.toLowerCase()
+  return /\.(ru|ir|cn)$/.test(s) || ['apple', 'icloud', 'microsoft'].some((k) => s.includes(k))
+}
+const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random', 'randomized']
+
+const PRESETS = [
+  { value: 'vless-reality-vision', label: 'VLESS + Reality + Vision' },
+  { value: 'vless-xhttp-reality', label: 'VLESS + XHTTP + Reality', disabled: true },
+  { value: 'ws-tls', label: 'VLESS / VMess + WS + TLS', disabled: true },
+  { value: 'trojan', label: 'Trojan + TLS', disabled: true },
+  { value: 'ss2022', label: 'Shadowsocks 2022', disabled: true },
+]
+
+function blankSpec(): InboundSpec {
+  return {
+    network: 'tcp',
+    security: 'reality',
+    vless: { flow: 'xtls-rprx-vision' },
+    reality: { target: 'dl.google.com:443', serverNames: ['dl.google.com'], privateKey: '', publicKey: '', shortIds: [], fingerprint: 'chrome', spiderX: '/', minClientVer: '' },
+    sniffing: true,
+  }
+}
+
+const form = reactive({
+  nodeId: undefined as number | undefined,
+  remark: '',
+  enabled: true,
+  listen: '',
+  port: 443,
+  linkHost: '',
+  linkPort: 0,
+  spec: blankSpec(),
+})
+const saving = ref(false)
+const probing = ref(false)
+const probe = ref<ProbeTargetResult | null>(null)
+const advanced = ref<string[]>([])
+let sniTouched = false
+
+const editing = computed(() => !!props.inbound)
+const vision = computed({
+  get: () => form.spec.vless.flow === 'xtls-rprx-vision',
+  set: (v) => (form.spec.vless.flow = v ? 'xtls-rprx-vision' : ''),
+})
+const nodeOptions = computed(() => props.nodes.map((n) => ({ value: n.id, label: n.name, online: n.runtime.online })))
+const nodeOnline = computed(() => props.nodes.find((n) => n.id === form.nodeId)?.runtime.online ?? false)
+const targetOptions = computed(() => TARGETS.map((t) => ({ value: `${t}:443` })))
+const risky = computed(() => form.spec.reality.serverNames.filter(riskySNI))
+
+function randomPort() {
+  form.port = 10000 + Math.floor(Math.random() * 50000)
+}
+
+async function genKeys() {
+  const r = await api.post<{ privateKey: string; publicKey: string }>('tools/x25519')
+  form.spec.reality.privateKey = r.privateKey
+  form.spec.reality.publicKey = r.publicKey
+}
+
+async function derivePublic() {
+  const pk = form.spec.reality.privateKey.trim()
+  if (!pk) return
+  try {
+    form.spec.reality.publicKey = (await api.post<{ publicKey: string }>('tools/x25519', { privateKey: pk })).publicKey
+  } catch (e: any) {
+    form.spec.reality.publicKey = ''
+    message.error(e.message)
+  }
+}
+
+async function addShortId() {
+  const r = await api.get<{ shortId: string }>('tools/short-id?bytes=8')
+  form.spec.reality.shortIds = [...form.spec.reality.shortIds, r.shortId]
+}
+
+watch(
+  () => form.spec.reality.target,
+  (t) => {
+    probe.value = null
+    const host = t.split(':')[0]
+    if (!sniTouched && host) form.spec.reality.serverNames = [host]
+  },
+)
+
+watch(open, async (v) => {
+  if (!v) return
+  probe.value = null
+  advanced.value = []
+  const src = props.inbound
+  sniTouched = !!src
+  if (src) {
+    Object.assign(form, {
+      nodeId: src.nodeId, remark: src.remark, enabled: src.enabled, listen: src.listen, port: src.port,
+      linkHost: src.linkHost, linkPort: src.linkPort, spec: JSON.parse(JSON.stringify(src.spec)),
+    })
+    return
+  }
+  Object.assign(form, {
+    nodeId: props.presetNodeId ?? props.nodes[0]?.id, remark: '', enabled: true, listen: '', port: 443,
+    linkHost: '', linkPort: 0, spec: blankSpec(),
+  })
+  try {
+    await Promise.all([genKeys(), addShortId()])
+  } catch (e: any) {
+    message.error(e.message)
+  }
+})
+
+async function runProbe() {
+  if (!form.nodeId) return
+  probing.value = true
+  probe.value = null
+  try {
+    probe.value = await api.post<ProbeTargetResult>(`nodes/${form.nodeId}/probe`, {
+      kind: 'reality_target',
+      target: form.spec.reality.target,
+      serverName: form.spec.reality.serverNames[0] ?? '',
+    })
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    probing.value = false
+  }
+}
+
+async function save() {
+  if (!form.nodeId) {
+    message.error('请选择服务器')
+    return
+  }
+  saving.value = true
+  try {
+    const body = { ...form, protocol: 'vless', linkPort: form.linkPort || 0 }
+    if (editing.value) await api.put(`inbounds/${props.inbound!.id}`, body)
+    else await api.post('inbounds', body)
+    message.success(editing.value ? '已保存，正在下发到服务器' : '已创建，正在下发到服务器')
+    open.value = false
+    emit('saved')
+  } catch (e: any) {
+    message.error(e.message)
+  } finally {
+    saving.value = false
+  }
+}
+</script>
+
+<template>
+  <a-drawer v-model:open="open" :title="editing ? '编辑入站' : '新建入站'" :width="620" class="inbound-drawer">
+    <a-form layout="vertical" @submit.prevent="save">
+      <section class="sec">
+        <h4>基础</h4>
+        <a-form-item label="协议组合">
+          <a-select :value="'vless-reality-vision'" :options="PRESETS" />
+        </a-form-item>
+        <div class="row">
+          <a-form-item label="服务器" required>
+            <a-select v-model:value="form.nodeId" :options="nodeOptions" :disabled="editing" placeholder="选择服务器">
+              <template #option="{ label, online }">
+                <span class="opt"><i :class="['dot', { on: online }]" />{{ label }}</span>
+              </template>
+            </a-select>
+          </a-form-item>
+          <a-form-item label="备注">
+            <a-input v-model:value="form.remark" :maxlength="64" placeholder="如：主力" />
+          </a-form-item>
+        </div>
+        <div class="row">
+          <a-form-item label="端口" required extra="Reality 推荐 443；被占用时会在保存前提示。">
+            <a-input-number v-model:value="form.port" :min="1" :max="65535" class="full mono">
+              <template #addonAfter>
+                <a-tooltip title="随机端口"><Dice5 :size="15" class="click" @click="randomPort" /></a-tooltip>
+              </template>
+            </a-input-number>
+          </a-form-item>
+          <a-form-item label="启用">
+            <a-switch v-model:checked="form.enabled" />
+          </a-form-item>
+        </div>
+      </section>
+
+      <section class="sec">
+        <h4>Reality</h4>
+        <a-form-item label="目标网站（target）" required extra="伪装的目标站点，需支持 TLS 1.3。「检测」会从这台服务器发起真实握手。">
+          <div class="inline">
+            <a-auto-complete v-model:value="form.spec.reality.target" :options="targetOptions" class="grow mono" placeholder="www.microsoft.com:443" />
+            <a-button :loading="probing" :disabled="!nodeOnline" @click="runProbe">
+              <Radar :size="15" class="ico" />检测
+            </a-button>
+          </div>
+          <div v-if="probe" class="probe">
+            <template v-if="probe.error && !probe.tls13">
+              <a-tag color="red" :bordered="false">{{ probe.error }}</a-tag>
+            </template>
+            <template v-else>
+              <a-tag :color="probe.tls13 ? 'green' : 'red'" :bordered="false">TLS 1.3 {{ probe.tls13 ? '支持' : '不支持' }}</a-tag>
+              <a-tag :color="probe.h2 ? 'green' : 'orange'" :bordered="false">H2 {{ probe.h2 ? '支持' : '不支持' }}</a-tag>
+              <a-tag :bordered="false" class="mono">{{ probe.latencyMs }} ms</a-tag>
+            </template>
+          </div>
+          <a-alert
+            v-if="risky.length"
+            type="warning"
+            show-icon
+            class="hint"
+            :message="`${risky.join('、')} 属于 Xray 告警的目标类型，会增加服务器 IP 被封锁的概率`"
+          />
+        </a-form-item>
+        <a-form-item label="SNI（serverNames）" required extra="默认取目标网站域名；第一个用于生成分享链接。">
+          <a-select v-model:value="form.spec.reality.serverNames" mode="tags" class="mono" :token-separators="[',', ' ']" @change="sniTouched = true" />
+        </a-form-item>
+        <a-form-item label="私钥" required>
+          <div class="inline">
+            <a-input v-model:value="form.spec.reality.privateKey" class="grow mono" @blur="derivePublic" />
+            <a-button @click="genKeys"><KeyRound :size="15" class="ico" />重新生成</a-button>
+          </div>
+        </a-form-item>
+        <a-form-item label="公钥" extra="由私钥派生，客户端链接中的 pbk。">
+          <a-input :value="form.spec.reality.publicKey" readonly class="mono" />
+        </a-form-item>
+        <a-form-item label="ShortID" required extra="0 到 16 位偶数长度十六进制；第一个用于生成分享链接。">
+          <div class="inline">
+            <a-select v-model:value="form.spec.reality.shortIds" mode="tags" class="grow mono" :token-separators="[',', ' ']" />
+            <a-button @click="addShortId"><Plus :size="15" class="ico" />添加</a-button>
+          </div>
+        </a-form-item>
+        <div class="row">
+          <a-form-item label="客户端指纹（fp）">
+            <a-select v-model:value="form.spec.reality.fingerprint" :options="FINGERPRINTS.map((v) => ({ value: v }))" />
+          </a-form-item>
+          <a-form-item label="SpiderX">
+            <a-input v-model:value="form.spec.reality.spiderX" class="mono" />
+          </a-form-item>
+        </div>
+      </section>
+
+      <a-collapse v-model:activeKey="advanced" ghost class="adv">
+        <a-collapse-panel key="adv" header="高级">
+          <div class="row">
+            <a-form-item label="XTLS Vision" extra="推荐开启，客户端需同样使用 xtls-rprx-vision。">
+              <a-switch v-model:checked="vision" />
+            </a-form-item>
+            <a-form-item label="流量探测（sniffing）" extra="仅用于路由判断，不改变目标地址。">
+              <a-switch v-model:checked="form.spec.sniffing" />
+            </a-form-item>
+          </div>
+          <a-form-item
+            label="最低客户端版本（minClientVer）"
+            extra="留空使用 Xray 默认值（v26.3.27 起默认要求客户端不低于 26.3.27）。第三方客户端无法连接时可调低，如 1.8.0；Xray 提示修改该值会增加被封锁的概率。"
+          >
+            <a-input v-model:value="form.spec.reality.minClientVer" class="mono" placeholder="Xray 默认" />
+          </a-form-item>
+          <a-form-item label="监听 IP" extra="留空监听全部地址。">
+            <a-input v-model:value="form.listen" class="mono" placeholder="0.0.0.0" />
+          </a-form-item>
+          <div class="row">
+            <a-form-item label="链接地址" extra="留空使用服务器公网地址。">
+              <a-input v-model:value="form.linkHost" class="mono" />
+            </a-form-item>
+            <a-form-item label="链接端口" extra="0 表示使用入站端口，适用于端口转发场景。">
+              <a-input-number v-model:value="form.linkPort" :min="0" :max="65535" class="full mono" />
+            </a-form-item>
+          </div>
+        </a-collapse-panel>
+      </a-collapse>
+    </a-form>
+
+    <template #footer>
+      <div class="foot">
+        <a-button @click="open = false">取消</a-button>
+        <a-button type="primary" :loading="saving" @click="save">{{ editing ? '保存' : '创建' }}</a-button>
+      </div>
+    </template>
+  </a-drawer>
+</template>
+
+<style scoped>
+.sec {
+  padding: 18px 18px 2px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.sec h4 {
+  margin: 0 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 14px;
+}
+.inline {
+  display: flex;
+  gap: 8px;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.full {
+  width: 100%;
+}
+.mono :deep(input) {
+  font-family: var(--font-mono);
+}
+.ico {
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+.click {
+  cursor: pointer;
+}
+.probe {
+  margin-top: 8px;
+}
+.hint {
+  margin-top: 8px;
+}
+.opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--idle);
+}
+.dot.on {
+  background: var(--ok);
+}
+.adv :deep(.ant-collapse-header) {
+  padding-left: 4px !important;
+  color: var(--text-2);
+}
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

@@ -14,10 +14,12 @@ import {
   Trash2,
 } from 'lucide-vue-next'
 import type { NodeItem } from '../lib/api'
+import SyncChip from './SyncChip.vue'
 import { ago, bytes, bytesParts, duration, percent } from '../lib/format'
 
 const props = defineProps<{ node: NodeItem; masterVersion: string; busy: boolean }>()
 const emit = defineEmits<{
+  synced: []
   edit: []
   install: []
   remove: []
@@ -158,6 +160,7 @@ function onMenu({ key }: { key: string | number }) {
           </div>
         </div>
         <p class="meta mono">
+          <SyncChip :node="node" class="sync" @retried="emit('synced')" />
           <span v-if="online && hb">已运行 {{ duration(hb.uptime) }}</span>
           <span v-if="online && hb">累计 ↓{{ bytes(hb.netRx) }} ↑{{ bytes(hb.netTx) }}</span>
           <a-tooltip v-if="agentOutdated" :title="`主控版本为 ${masterVersion}，可通过重装命令更新被控端`">
@@ -469,6 +472,11 @@ h3 {
   margin: 10px 0 0;
   font-size: 11px;
   color: var(--text-3);
+}
+
+.meta .sync {
+  font-family: var(--font-body);
+  font-size: 11px;
 }
 
 .outdated {
