@@ -425,7 +425,10 @@ x-hub/
 
 - 分组成员由主控按正则展开为具体节点名（不依赖客户端的 include-all），各客户端行为一致；按正则未匹配到任何节点的分组补 DIRECT，并在预览中提示。
 - 保存时校验：正则合法、分组 / 规则集引用存在、分组之间无循环引用、MATCH 位于最后。
-- 托管规则集以 `<公开地址>/<订阅路径>/rules/<令牌>/<名称>.yaml` 提供（令牌防枚举），Mihomo 直接引用；阶段三起同时提供 sing-box 格式，外部规则集由主控转换后中转。
+- 规则集统一由主控以 `<公开地址>/<订阅路径>/rules/<令牌>/<名称>.<扩展名>` 提供（令牌防枚举），客户端不需要能访问规则集的原始地址：
+  - Mihomo：托管规则集为 `.yaml`；外部规则集按格式以 `.yaml` / `.txt` / `.mrs` 原样中转；
+  - sing-box / Shadowrocket：`.json` / `.list` 为转换后的格式（见 16.4、16.5）；
+  - 外部规则集由主控拉取，按更新间隔缓存在内存中，拉取失败时使用旧内容；未设置公开访问地址时 Mihomo 保持原链接。
 - 导入：粘贴现有 Mihomo YAML，拆分为分组、规则集（入库，同名同 URL 复用）、规则与基础配置；`use` + `filter` 的分组转换为节点筛选。
 
 ### 16.3 外部节点（阶段二）
@@ -446,8 +449,8 @@ x-hub/
 
 - 基础配置为 JSON 原文，为空时使用默认模板；`outbounds`、`route.rule_set`、`route.final` 由方案生成，基础配置中的 `route.rules`（sniff、hijack-dns 等）排在方案规则之前。
 - 分组：select → selector，url-test → urltest；fallback / load-balance 以 urltest 代替并提示。直连出站标签为 `DIRECT`，分组成员可直接引用。sing-box 没有 REJECT 出站：从成员中移除，只含 REJECT 的分组视为拒绝分组，以它为目标的规则输出 `action: reject`（REJECT-DROP 为 `method: drop`）。
-- 规则：域名 / IP / 端口 / 进程 / 网络类规则逐条转换；GEOIP LAN → `ip_is_private`，GEOSITE / GEOIP 其他值 → SagerNet 官方 `geosite-*` / `geoip-*` 二进制规则集；第一条需要目标 IP 且未设 no-resolve 的规则前插入 `action: resolve`，与 Mihomo 的解析行为一致。RAW（逻辑规则）、IP-ASN 跳过并提示。MATCH → `route.final`。
-- 规则集：规则集库中的规则集统一指向主控的 `<名称>.json`（sing-box 源格式）：托管规则集直接转换；外部规则集由主控拉取 Mihomo YAML / text 后转换，按更新间隔缓存在内存中，拉取失败时使用旧内容；mrs 无法转换。基础配置中引用的规则集（如 DNS 规则的 `geosite-cn`）一并定义。
+- 规则：域名 / IP / 端口 / 进程 / 网络类规则逐条转换；GEOIP LAN → `ip_is_private`，GEOSITE / GEOIP 其他值 → SagerNet 官方 `geosite-*` / `geoip-*` 二进制规则集（经主控 `rules/<令牌>/geo/<标签>.srs` 中转，缓存一天）；第一条需要目标 IP 且未设 no-resolve 的规则前插入 `action: resolve`，与 Mihomo 的解析行为一致。RAW（逻辑规则）、IP-ASN 跳过并提示。MATCH → `route.final`。
+- 规则集：规则集库中的规则集统一指向主控的 `<名称>.json`（sing-box 源格式）：托管规则集直接转换；外部规则集由主控拉取 Mihomo YAML / text 后转换（与 Mihomo 中转共用缓存）；mrs 无法转换。基础配置中引用的规则集（如 DNS 规则的 `geosite-cn`）一并定义。
 - 主控提供的规则集以 `download_detour: DIRECT` 直连下载（与订阅本身一致，避免节点不可用时客户端无法启动）；该字段在 1.14 起提示弃用，1.16 前需改为按客户端版本输出 `http_clients`。
 - 节点：自有节点沿用原有转换；外部节点由 Mihomo 定义转换为 sing-box 出站，前置输出为 `detour`；XHTTP 等 sing-box 不支持的节点跳过并提示。
 

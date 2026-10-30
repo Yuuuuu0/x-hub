@@ -62,7 +62,7 @@ async function save() {
         <a-textarea v-model:value="form.content" class="mono" :auto-size="{ minRows: 10, maxRows: 20 }" />
       </a-form-item>
       <template v-else>
-        <a-form-item label="链接" required>
+        <a-form-item label="链接" required extra="由面板拉取后提供给客户端，客户端无需能访问该链接（需在「设置 → 访问」中填写公开访问地址）。">
           <a-input v-model:value="form.url" class="mono" placeholder="https://example.com/rules/MyDirect.txt" />
         </a-form-item>
         <div class="row">

@@ -20,7 +20,8 @@ const singBoxDirect = "DIRECT"
 // RenderSingBox 把方案渲染为 sing-box 配置（1.12+）：基础配置在前，生成 outbounds（分组、节点与直连）、
 // route.rules（基础配置中的规则在前）、route.rule_set（方案与基础配置引用到的规则集）与 route.final。
 // sing-box 不支持的内容（RAW 规则、IP-ASN、REJECT 成员等）跳过并返回提示。
-func (p *Profile) RenderSingBox(nodes []Node, sets map[string]RuleSetRef) ([]byte, []string, error) {
+// geoBase 为主控中转 geosite / geoip 规则集的目录地址，为空时直接使用 SagerNet 官方地址。
+func (p *Profile) RenderSingBox(nodes []Node, sets map[string]RuleSetRef, geoBase string) ([]byte, []string, error) {
 	baseText := p.SingBox.Base
 	if strings.TrimSpace(baseText) == "" {
 		baseText = DefaultSingBoxBase
@@ -161,7 +162,7 @@ func (p *Profile) RenderSingBox(nodes []Node, sets map[string]RuleSetRef) ([]byt
 	}
 	var ruleSets []any
 	for _, tag := range used {
-		if def, ok := singBoxRuleSetDef(tag, sets); ok {
+		if def, ok := singBoxRuleSetDef(tag, sets, geoBase); ok {
 			ruleSets = append(ruleSets, def)
 		} else {
 			warn("规则集 %s 无法用于 sing-box", tag)
@@ -317,25 +318,39 @@ func ruleSetTags(v any) []string {
 	return slices.Compact(out)
 }
 
-// singBoxRuleSetDef 返回规则集定义：规则集库中的规则集指向主控转换后的地址（直连下载），
-// geosite-* / geoip-* 使用 SagerNet 官方规则集（经默认出站下载）。
-func singBoxRuleSetDef(tag string, sets map[string]RuleSetRef) (map[string]any, bool) {
+// singBoxRuleSetDef 返回规则集定义：规则集库中的规则集指向主控转换后的地址；geosite-* / geoip-* 使用
+// SagerNet 官方规则集，有 geoBase 时经主控中转。主控提供的规则集直连下载，否则经默认出站下载。
+func singBoxRuleSetDef(tag string, sets map[string]RuleSetRef, geoBase string) (map[string]any, bool) {
 	if ref, ok := sets[tag]; ok {
 		if ref.SingBoxURL == "" {
 			return nil, false
 		}
-		// 规则集由主控提供，与订阅本身一样直连下载，避免节点不可用时规则集无法加载、客户端无法启动。
-		// download_detour 在 1.14 起提示弃用，替代的 http_client 在 1.12 / 1.13 上无法解析，暂沿用。
-		return map[string]any{"type": "remote", "tag": tag, "format": "source", "url": ref.SingBoxURL,
-			"download_detour": singBoxDirect, "update_interval": fmt.Sprintf("%ds", ref.Interval)}, true
+		return singBoxHostedSet(tag, "source", ref.SingBoxURL, fmt.Sprintf("%ds", ref.Interval)), true
 	}
-	for prefix, repo := range map[string]string{"geosite-": "sing-geosite", "geoip-": "sing-geoip"} {
-		if strings.HasPrefix(tag, prefix) {
-			return map[string]any{"type": "remote", "tag": tag, "format": "binary",
-				"url": "https://raw.githubusercontent.com/SagerNet/" + repo + "/rule-set/" + tag + ".srs"}, true
-		}
+	if !strings.HasPrefix(tag, "geosite-") && !strings.HasPrefix(tag, "geoip-") {
+		return nil, false
 	}
-	return nil, false
+	if geoBase != "" {
+		return singBoxHostedSet(tag, "binary", geoBase+tag+".srs", "1d"), true
+	}
+	return map[string]any{"type": "remote", "tag": tag, "format": "binary", "url": GeoRuleSetURL(tag)}, true
+}
+
+// singBoxHostedSet 返回主控提供的远程规则集定义。规则集与订阅本身一样直连下载，避免节点不可用时
+// 规则集无法加载、客户端无法启动；download_detour 在 1.14 起提示弃用，替代的 http_client 在 1.12 / 1.13
+// 上无法解析，暂沿用。
+func singBoxHostedSet(tag, format, url, interval string) map[string]any {
+	return map[string]any{"type": "remote", "tag": tag, "format": format, "url": url,
+		"download_detour": singBoxDirect, "update_interval": interval}
+}
+
+// GeoRuleSetURL 返回 SagerNet 官方 geosite-* / geoip-* 规则集的下载地址。
+func GeoRuleSetURL(tag string) string {
+	repo := "sing-geoip"
+	if strings.HasPrefix(tag, "geosite-") {
+		repo = "sing-geosite"
+	}
+	return "https://raw.githubusercontent.com/SagerNet/" + repo + "/rule-set/" + tag + ".srs"
 }
 
 // ParseMihomoRuleSet 解析 Mihomo 规则集文件的条目：format 为 text 时每行一条，为空或 yaml 时读取 payload。

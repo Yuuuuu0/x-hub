@@ -15,7 +15,8 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 )
 
-// ruleSetRefs 返回规则集库中各规则集的下载信息：托管的指向主控，外部的保持原链接。
+// ruleSetRefs 返回规则集库中各规则集的下载信息：设置了公开访问地址时统一指向主控（托管的直接提供，
+// 外部的由主控拉取后中转），客户端无需能访问规则集的原始地址；未设置时外部规则集保持原链接。
 func (h *Handler) ruleSetRefs() (map[string]routing.RuleSetRef, error) {
 	list, err := h.Store.ListRuleSets()
 	if err != nil {
@@ -26,6 +27,8 @@ func (h *Handler) ruleSetRefs() (map[string]routing.RuleSetRef, error) {
 		ref := routing.RuleSetRef{Name: rs.Name, Behavior: rs.Behavior, URL: rs.URL, Format: rs.Format, Interval: rs.Interval}
 		if rs.Source == routing.SetHosted {
 			ref.URL, ref.Format = h.hostedRuleURL(rs.Name, ".yaml"), ""
+		} else if u := h.hostedRuleURL(rs.Name, mihomoRuleExt[rs.Format]); u != "" {
+			ref.URL = u
 		}
 		if rs.Format != "mrs" {
 			ref.SingBoxURL = h.hostedRuleURL(rs.Name, ".json")
@@ -36,14 +39,35 @@ func (h *Handler) ruleSetRefs() (map[string]routing.RuleSetRef, error) {
 	return out, nil
 }
 
-// hostedRuleURL 返回主控提供的规则集地址：.yaml 为托管规则集的 Mihomo 格式；.json / .list 为转换后的
-// sing-box / Shadowrocket 格式（托管与外部规则集均可）。未设置公开访问地址时为空。
-func (h *Handler) hostedRuleURL(name, ext string) string {
+// mihomoRuleExt 为外部规则集按格式中转时使用的扩展名。
+var mihomoRuleExt = map[string]string{"": ".yaml", "yaml": ".yaml", "text": ".txt", "mrs": ".mrs"}
+
+// ruleBaseURL 返回主控提供规则集的目录地址（以 / 结尾），未设置公开访问地址时为空。
+func (h *Handler) ruleBaseURL() string {
 	base := h.Settings.Access().PublicURL
 	if base == "" {
 		return ""
 	}
-	return base + "/" + h.Settings.Subscription().Path + "/rules/" + h.Settings.RulesToken() + "/" + url.PathEscape(name) + ext
+	return base + "/" + h.Settings.Subscription().Path + "/rules/" + h.Settings.RulesToken() + "/"
+}
+
+// hostedRuleURL 返回主控提供的规则集地址：.yaml / .txt / .mrs 为 Mihomo 格式（托管规则集或中转的外部规则集），
+// .json / .list 为转换后的 sing-box / Shadowrocket 格式。未设置公开访问地址时为空。
+func (h *Handler) hostedRuleURL(name, ext string) string {
+	base := h.ruleBaseURL()
+	if base == "" {
+		return ""
+	}
+	return base + url.PathEscape(name) + ext
+}
+
+// geoRuleBase 返回主控中转 sing-box geosite / geoip 规则集的目录地址，未设置公开访问地址时为空。
+func (h *Handler) geoRuleBase() string {
+	base := h.ruleBaseURL()
+	if base == "" {
+		return ""
+	}
+	return base + "geo/"
 }
 
 func (h *Handler) ruleSetNames() (map[string]bool, error) {
@@ -564,16 +588,26 @@ func writeRuleSetError(w http.ResponseWriter, err error) {
 	writeStoreError(w, err)
 }
 
-// serveHostedRuleSet 对外提供规则集：rules/<令牌>/<名称>.yaml 为托管规则集的 Mihomo 格式，
-// <名称>.json / <名称>.list 为 sing-box / Shadowrocket 格式。
+// serveHostedRuleSet 对外提供规则集：rules/<令牌>/<名称>.yaml 为托管规则集的 Mihomo 格式，外部规则集按格式以
+// .yaml / .txt / .mrs 原样中转；<名称>.json / <名称>.list 为 sing-box / Shadowrocket 格式；geo/<标签>.srs 为中转的
+// SagerNet 规则集。
 func (h *Handler) serveHostedRuleSet(w http.ResponseWriter, r *http.Request, rest string) {
 	token, file, ok := strings.Cut(rest, "/")
 	if !ok || token != h.Settings.RulesToken() {
 		http.NotFound(w, r)
 		return
 	}
+	if geo, isGeo := strings.CutPrefix(file, "geo/"); isGeo {
+		tag, found := strings.CutSuffix(geo, ".srs")
+		if !found {
+			http.NotFound(w, r)
+			return
+		}
+		h.serveGeoRuleSet(w, r, tag)
+		return
+	}
 	name, ext := file, ""
-	for _, e := range []string{".yaml", ".json", ".list"} {
+	for _, e := range []string{".yaml", ".txt", ".mrs", ".json", ".list"} {
 		if n, found := strings.CutSuffix(file, e); found {
 			name, ext = n, e
 		}
@@ -589,14 +623,15 @@ func (h *Handler) serveHostedRuleSet(w http.ResponseWriter, r *http.Request, res
 		return
 	}
 	w.Header().Set("Cache-Control", "no-cache")
-	if ext != ".yaml" {
+	switch {
+	case ext == ".json" || ext == ".list":
 		h.serveConvertedRuleSet(w, r, rs, ext)
-		return
-	}
-	if rs.Source != routing.SetHosted {
+	case rs.Source != routing.SetHosted:
+		h.serveRelayedRuleSet(w, r, rs)
+	case ext == ".yaml":
+		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+		w.Write(routing.HostedMihomo(rs.Content))
+	default:
 		http.NotFound(w, r)
-		return
 	}
-	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	w.Write(routing.HostedMihomo(rs.Content))
 }

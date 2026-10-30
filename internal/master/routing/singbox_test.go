@@ -31,7 +31,7 @@ func TestRenderSingBox(t *testing.T) {
 		{Name: "住宅", SingBox: map[string]any{"type": "socks"}, Dialer: "美国 1", DialerNode: true},
 	}
 	sets := map[string]RuleSetRef{"Ads": {Name: "Ads", Behavior: "domain", Interval: 86400, SingBoxURL: "https://p/rules/t/Ads.json"}}
-	out, warnings, err := p.RenderSingBox(nodes, sets)
+	out, warnings, err := p.RenderSingBox(nodes, sets, "https://p/rules/t/geo/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +69,11 @@ func TestRenderSingBox(t *testing.T) {
 	}
 	if cfg.Route.Final != "代理" || len(cfg.Route.RuleSet) != 3 {
 		t.Fatalf("final / rule_set: %s %v", cfg.Route.Final, cfg.Route.RuleSet)
+	}
+	for _, rs := range cfg.Route.RuleSet {
+		if rs["download_detour"] != "DIRECT" || (rs["tag"] != "Ads" && rs["url"] != "https://p/rules/t/geo/"+rs["tag"].(string)+".srs") {
+			t.Fatalf("rule set via master: %v", rs)
+		}
 	}
 	joined := strings.Join(warnings, "\n")
 	for _, w := range []string{"XHTTP", "IP-ASN", "RAW", "fallback"} {
