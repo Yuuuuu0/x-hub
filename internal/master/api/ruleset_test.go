@@ -59,3 +59,32 @@ func TestRuleSetRelay(t *testing.T) {
 		t.Fatalf("invalid geo tag: %d", rec.Code)
 	}
 }
+
+// TestInspectRuleSet 覆盖规则集格式检测：内容与所选格式不一致时给出建议，与文件扩展名无关。
+func TestInspectRuleSet(t *testing.T) {
+	yamlBody := "# 注释\npayload:\n  - '91.108.4.0/22'\n  - '91.108.8.0/21'\n"
+	cases := []struct {
+		name, body, format string
+		rules              int
+		suggest            string
+		warned             bool
+	}{
+		{"yaml 选 text", yamlBody, "text", 2, "yaml", true},
+		{"yaml 选默认", yamlBody, "", 2, "", false},
+		{"yaml 选 yaml", "---\n" + yamlBody, "yaml", 2, "", false},
+		{"text 选默认", "1.1.1.0/24\n2.2.2.0/24\n3.3.3.0/24\n", "", 3, "text", true},
+		{"text 选 text", "1.1.1.0/24\n", "text", 1, "", false},
+		{"mrs 选 mrs", "\x28\xb5\x2f\xfd\x00", "mrs", 0, "", false},
+		{"mrs 选 text", "\x28\xb5\x2f\xfd\x00", "text", 0, "mrs", true},
+		{"text 选 mrs", "1.1.1.0/24\n", "mrs", 1, "text", true},
+		{"网页", "<!DOCTYPE html>\n<html></html>\n", "", 0, "", true},
+		{"空内容", "\n# 只有注释\n", "text", 0, "", true},
+		{"空 payload", "payload:\n", "yaml", 0, "", true},
+	}
+	for _, c := range cases {
+		got := inspectRuleSet([]byte(c.body), c.format)
+		if got.Rules != c.rules || got.Suggest != c.suggest || (got.Warning != "") != c.warned {
+			t.Errorf("%s: %+v", c.name, got)
+		}
+	}
+}

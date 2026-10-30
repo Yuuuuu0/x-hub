@@ -370,6 +370,27 @@ func ParseMihomoRuleSet(body []byte, format string) ([]string, error) {
 	return nil, fmt.Errorf("规则集格式 %s 无法转换为 sing-box", format)
 }
 
+// zstdMagic 为 zstd 数据的文件头，mrs 规则集是 zstd 压缩的二进制文件。
+var zstdMagic = []byte{0x28, 0xB5, 0x2F, 0xFD}
+
+// DetectRuleSetFormat 根据内容判断规则集文件的实际格式（与文件扩展名无关）：mrs、yaml（含 payload: 行）、text；
+// 内容是网页时返回 html，没有有效内容时返回空。
+func DetectRuleSetFormat(body []byte) string {
+	if bytes.HasPrefix(body, zstdMagic) {
+		return "mrs"
+	}
+	lines := RuleLines(strings.TrimPrefix(string(body), "\uFEFF"))
+	switch {
+	case len(lines) == 0:
+		return ""
+	case slices.ContainsFunc(lines, func(l string) bool { return strings.HasPrefix(l, "payload:") }):
+		return "yaml"
+	case strings.HasPrefix(lines[0], "<"):
+		return "html"
+	}
+	return "text"
+}
+
 var wildcard = regexp.MustCompile(`\\\*`)
 
 // SingBoxRuleSet 把规则集条目转换为 sing-box 源格式规则集（JSON），返回内容与无法转换的条目数。

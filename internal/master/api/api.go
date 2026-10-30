@@ -104,6 +104,7 @@ func (h *Handler) Init() {
 	m.HandleFunc("POST /api/external/{id}/refresh", h.authed(h.refreshExternal))
 	m.HandleFunc("GET /api/rulesets", h.authed(h.listRuleSets))
 	m.HandleFunc("POST /api/rulesets", h.authed(h.createRuleSet))
+	m.HandleFunc("POST /api/rulesets/check", h.authed(h.checkRuleSet))
 	m.HandleFunc("PUT /api/rulesets/{id}", h.authed(h.updateRuleSet))
 	m.HandleFunc("DELETE /api/rulesets/{id}", h.authed(h.deleteRuleSet))
 	m.HandleFunc("POST /api/tools/x25519", h.authed(h.x25519))

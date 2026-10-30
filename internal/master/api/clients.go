@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -141,6 +143,61 @@ func fetchRuleSet(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("拉取规则集失败：HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+}
+
+// ruleSetCheck 为外部规则集的检测结果。Suggest 为内容与所选格式不一致时建议使用的格式；
+// FetchError 非空表示无法拉取，未做检测。
+type ruleSetCheck struct {
+	Rules      int    `json:"rules"`
+	Warning    string `json:"warning,omitempty"`
+	Suggest    string `json:"suggest,omitempty"`
+	FetchError string `json:"fetchError,omitempty"`
+}
+
+// inspectRuleSet 检测规则集内容的实际格式是否与所选格式 format（空表示 yaml）一致，并统计条目数（mrs 无法统计）。
+func inspectRuleSet(body []byte, format string) ruleSetCheck {
+	detected := routing.DetectRuleSetFormat(body)
+	switch detected {
+	case "":
+		return ruleSetCheck{Warning: "链接返回的内容为空，没有可用的规则。"}
+	case "html":
+		return ruleSetCheck{Warning: "链接返回的是网页，不是规则集文件。GitHub 上的文件请使用 Raw 链接。"}
+	}
+	var res ruleSetCheck
+	if detected != "mrs" {
+		lines, err := routing.ParseMihomoRuleSet(body, detected)
+		if err != nil {
+			return ruleSetCheck{Warning: err.Error()}
+		}
+		if res.Rules = len(lines); res.Rules == 0 {
+			return ruleSetCheck{Warning: "规则集中没有规则。"}
+		}
+	}
+	if selected := cmp.Or(format, "yaml"); detected != selected {
+		res.Suggest = detected
+		res.Warning = fmt.Sprintf("链接的内容实际是 %s 格式，当前选择的是 %s。格式不一致时客户端无法正确解析，生效规则数会是 0 或明显偏少。", detected, selected)
+	}
+	return res
+}
+
+// checkRuleSet 拉取外部规则集并检测格式，供保存前提示。拉取失败不算错误，由前端决定是否继续保存。
+func (h *Handler) checkRuleSet(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		URL    string `json:"url"`
+		Format string `json:"format"`
+	}
+	if err := readJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "请求格式错误")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	body, err := fetchRuleSet(ctx, strings.TrimSpace(in.URL))
+	if err != nil {
+		writeJSON(w, http.StatusOK, ruleSetCheck{FetchError: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, inspectRuleSet(body, in.Format))
 }
 
 // renderSingBoxProfile 以订阅可用的节点把方案渲染为 sing-box 配置。

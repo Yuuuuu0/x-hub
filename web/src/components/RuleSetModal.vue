@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { api, type RuleSetItem } from '../lib/api'
+import { api, type RuleSetCheck, type RuleSetItem } from '../lib/api'
 
 // 新建或编辑规则集：托管（在面板编辑内容）或外部链接。
 const props = defineProps<{ ruleSet: RuleSetItem | null }>()
@@ -16,21 +16,43 @@ const HINT: Record<string, string> = {
 
 const form = reactive({ name: '', behavior: 'domain', source: 'hosted', url: '', format: '', interval: 86400, content: '', note: '' })
 const saving = ref(false)
+// 格式检测的提示；confirmed 记录用户看过提示的链接与格式，再次保存时不再拦截。
+const notice = reactive({ warning: '', suggest: '' })
+let confirmed = ''
+
+watch(() => [form.source, form.url, form.format], () => Object.assign(notice, { warning: '', suggest: '' }))
 
 watch(open, (v) => {
   if (!v) return
+  confirmed = ''
   const r = props.ruleSet
   Object.assign(form, r
     ? { name: r.name, behavior: r.behavior, source: r.source, url: r.url, format: r.format, interval: r.interval, content: r.content, note: r.note }
     : { name: '', behavior: 'domain', source: 'hosted', url: '', format: '', interval: 86400, content: '', note: '' })
 })
 
+// check 检测外部链接的内容并记下提示；托管规则集或用户已确认过时不检测，返回 null。
+async function check() {
+  const key = `${form.url}|${form.format}`
+  if (form.source !== 'url' || confirmed === key) return null
+  const r = await api.post<RuleSetCheck>('rulesets/check', { url: form.url, format: form.format })
+  if (r.warning) {
+    Object.assign(notice, { warning: r.warning, suggest: r.suggest ?? '' })
+    confirmed = key
+  }
+  return r
+}
+
 async function save() {
   saving.value = true
   try {
+    const r = await check()
+    if (r?.warning) return
     if (props.ruleSet) await api.put(`rulesets/${props.ruleSet.id}`, form)
     else await api.post('rulesets', form)
-    message.success(props.ruleSet && props.ruleSet.name !== form.name ? '已保存，引用它的方案已同步改名' : '已保存')
+    if (r?.fetchError) message.warning(`已保存，但未能检测规则集：${r.fetchError}`)
+    else if (props.ruleSet && props.ruleSet.name !== form.name) message.success('已保存，引用它的方案已同步改名')
+    else message.success(r?.rules ? `已保存，共 ${r.rules} 条规则` : '已保存')
     open.value = false
     emit('saved')
   } catch (e: any) {
@@ -38,6 +60,12 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+// applySuggest 改用检测到的格式并保存。
+function applySuggest() {
+  form.format = notice.suggest === 'yaml' ? '' : notice.suggest
+  save()
 }
 </script>
 
@@ -66,7 +94,7 @@ async function save() {
           <a-input v-model:value="form.url" class="mono" placeholder="https://example.com/rules/MyDirect.txt" />
         </a-form-item>
         <div class="row">
-          <a-form-item label="格式" extra="留空按 yaml 处理；纯文本列表选 text。">
+          <a-form-item label="格式" extra="以文件内容为准，与扩展名无关：含 payload: 的是 yaml，每行一条的是 text。">
             <a-select v-model:value="form.format" :options="[{ value: '', label: '默认（yaml）' }, { value: 'text', label: 'text' }, { value: 'mrs', label: 'mrs' }]" />
           </a-form-item>
           <a-form-item label="更新间隔（秒）">
@@ -77,6 +105,11 @@ async function save() {
       <a-form-item label="备注">
         <a-input v-model:value="form.note" :maxlength="100" />
       </a-form-item>
+      <a-alert v-if="notice.warning" type="warning" show-icon :message="notice.warning" description="确认无误可再次点击保存。">
+        <template v-if="notice.suggest" #action>
+          <a-button size="small" type="primary" :loading="saving" @click="applySuggest">改为 {{ notice.suggest }} 并保存</a-button>
+        </template>
+      </a-alert>
     </a-form>
   </a-modal>
 </template>

@@ -338,6 +338,13 @@ export interface ProfileItem {
   updatedAt: number
 }
 
+export interface RuleSetCheck {
+  rules: number
+  warning?: string
+  suggest?: string
+  fetchError?: string
+}
+
 export interface RuleSetItem {
   id: number
   name: string
