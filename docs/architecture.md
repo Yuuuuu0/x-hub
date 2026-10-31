@@ -182,6 +182,7 @@ Inbound
 - 入站生效 clients = `enabled 且 state=active 的订阅` ∩ `(all_inbounds 或 在授权表中)`。
 - 订阅地址：`<public_url>/<sub_path>/{token}`，`sub_path` 首次启动随机生成、可在设置中修改，且不能与面板路径相同；令牌无效或订阅停用时一律 404。
 - 订阅链接令牌可单独重置（旧链接失效、已导入节点不受影响）；凭据重置则使已导入节点失效。
+- 节点顺序：入站有一个全局顺序（`inbounds.sort`，与服务器无关，可跨服务器穿插），面板拖动调整，订阅按此输出，外部节点排在自有节点之后。编译 Xray 配置时固定按入站 ID 排序，调整顺序不改变配置哈希，不触发下发与重启。
 - 节点名称按模板生成（`{node}` `{remark}` `{port}` `{flag}` `{region}` `{traffic}` `{days}`），重名自动追加序号。模板以 `|` 分段，某段变量全部为空时省略。地区取服务器手动指定的国家或地区，否则为被控端按出口 IP 检测的结果（Cloudflare trace，失败时 ipinfo.io，连接前检测、失败时重连再测）；剩余流量为服务器流量配额减本计费周期按计费方式（双向 / 仅出站 / 取较大值）统计的用量，剩余天数取 VPS 到期时间。
   - 按 User-Agent 自动选择格式（sing-box → Mihomo → Base64），`?format=base64|mihomo|singbox` 可强制。
   - sing-box 输出 1.12+ 格式（TUN + 本地 mixed 入站），规则集不设置 `download_detour`：它在 1.14 被弃用，而替代的 `http_client` 在 1.12 / 1.13 上无法解析。1.14 下会有一条弃用警告，1.16 起需按客户端版本输出 `http_clients`。

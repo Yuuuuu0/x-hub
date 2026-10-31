@@ -41,8 +41,8 @@ func scanInbound(r rowScanner) (*Inbound, error) {
 	return &in, nil
 }
 
-func (s *Store) queryInbounds(where string, args ...any) ([]*Inbound, error) {
-	rows, err := s.db.Query("SELECT "+inboundColumns+" FROM inbounds "+where+" ORDER BY node_id, sort, id", args...)
+func (s *Store) queryInbounds(clause string, args ...any) ([]*Inbound, error) {
+	rows, err := s.db.Query("SELECT "+inboundColumns+" FROM inbounds "+clause, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -58,13 +58,19 @@ func (s *Store) queryInbounds(where string, args ...any) ([]*Inbound, error) {
 	return out, rows.Err()
 }
 
-// ListInbounds 返回全部入站。
-func (s *Store) ListInbounds() ([]*Inbound, error) { return s.queryInbounds("") }
-
-// ListNodeInbounds 返回某台服务器的入站。
-func (s *Store) ListNodeInbounds(nodeID int64) ([]*Inbound, error) {
-	return s.queryInbounds("WHERE node_id = ?", nodeID)
+// ListInbounds 按面板设定的顺序返回全部入站，订阅按此顺序输出节点。
+func (s *Store) ListInbounds() ([]*Inbound, error) {
+	return s.queryInbounds("ORDER BY sort, id")
 }
+
+// ListNodeInbounds 按 ID 返回某台服务器的入站，用于编译配置：顺序不随展示顺序变化，
+// 否则调整顺序会改变配置哈希，导致重新下发并重启 Xray。
+func (s *Store) ListNodeInbounds(nodeID int64) ([]*Inbound, error) {
+	return s.queryInbounds("WHERE node_id = ? ORDER BY id", nodeID)
+}
+
+// ReorderInbounds 按 ids 的先后设置入站顺序。
+func (s *Store) ReorderInbounds(ids []int64) error { return s.reorder("inbounds", ids) }
 
 // GetInbound 按 ID 查询入站。
 func (s *Store) GetInbound(id int64) (*Inbound, error) {
@@ -75,11 +81,11 @@ func (s *Store) GetInbound(id int64) (*Inbound, error) {
 	return in, err
 }
 
-// CreateInbound 新建入站，返回新 ID。
+// CreateInbound 新建入站并排在最后，返回新 ID。
 func (s *Store) CreateInbound(in *Inbound) (int64, error) {
 	now := time.Now().Unix()
-	id, err := s.insertWithID("inbounds", `INSERT INTO inbounds (id, node_id, remark, enabled, listen, port, protocol, spec_json, link_host, link_port, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	id, err := s.insertWithID("inbounds", `INSERT INTO inbounds (id, node_id, remark, sort, enabled, listen, port, protocol, spec_json, link_host, link_port, created_at, updated_at)
+		VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), -1) + 1 FROM inbounds), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.NodeID, in.Remark, in.Enabled, in.Listen, in.Port, in.Protocol, string(in.Spec), in.LinkHost, in.LinkPort, now, now)
 	if err != nil {
 		return 0, mapConstraint(err)

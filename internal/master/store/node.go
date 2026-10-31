@@ -96,9 +96,13 @@ func (s *Store) GetNode(id int64) (*Node, error) {
 
 // CreateNode 新建服务器记录，返回新 ID。
 func (s *Store) CreateNode(name, remark, publicHost string) (int64, error) {
-	return s.insertWithID("nodes", "INSERT INTO nodes (id, name, remark, public_host, created_at) VALUES (?, ?, ?, ?, ?)",
+	return s.insertWithID("nodes", `INSERT INTO nodes (id, name, remark, sort, public_host, created_at)
+		VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), -1) + 1 FROM nodes), ?, ?)`,
 		name, remark, publicHost, time.Now().Unix())
 }
+
+// ReorderNodes 按 ids 的先后设置服务器顺序。
+func (s *Store) ReorderNodes(ids []int64) error { return s.reorder("nodes", ids) }
 
 // NodeSettings 为服务器的可编辑字段。
 type NodeSettings struct {

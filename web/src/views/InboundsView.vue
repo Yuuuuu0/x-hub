@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
-import { Pencil, Plus, QrCode, Trash2 } from 'lucide-vue-next'
+import { GripVertical, Pencil, Plus, QrCode, Trash2 } from 'lucide-vue-next'
 import { api, type InboundItem, type NodeItem } from '../lib/api'
+import { useDragSort } from '../lib/dragSort'
 import { usePolling } from '../lib/poll'
 import InboundFormDrawer from '../components/InboundFormDrawer.vue'
 import ShareModal from '../components/ShareModal.vue'
@@ -11,15 +12,28 @@ import { hostOf, tagsOf } from '../lib/presets'
 
 const POLL_MS = 5000
 
+// 窄屏隐藏次要列，服务器与端口收进名称下方。
+const COLUMNS = [
+  { key: 'grip', width: 44, responsive: ['md'] },
+  { title: '启用', key: 'enabled', width: 72 },
+  { title: '名称', key: 'name', ellipsis: true },
+  { title: '协议', key: 'protocol', responsive: ['xl'] },
+  { title: '服务器', key: 'node', responsive: ['sm'] },
+  { title: '端口', key: 'port', width: 96, responsive: ['sm'] },
+  { title: '伪装 / 域名', key: 'host', ellipsis: true, responsive: ['xl'] },
+  { key: 'actions', width: 128, align: 'right' },
+]
+
 const inbounds = ref<InboundItem[]>([])
 const nodes = ref<NodeItem[]>([])
 const loaded = ref(false)
 const toggling = ref<Record<number, boolean>>({})
 
 const current = ref<InboundItem | null>(null)
-const presetNode = ref<number>()
 const showForm = ref(false)
 const showShare = ref(false)
+
+const sort = useDragSort(inbounds, 'inbounds/order', load)
 
 async function load() {
   try {
@@ -27,7 +41,7 @@ async function load() {
       api.get<{ inbounds: InboundItem[] }>('inbounds'),
       api.get<{ nodes: NodeItem[] }>('nodes'),
     ])
-    inbounds.value = a.inbounds
+    if (!sort.busy.value) inbounds.value = a.inbounds
     nodes.value = b.nodes
   } catch (e: any) {
     if (!loaded.value) message.error(e.message)
@@ -38,20 +52,14 @@ async function load() {
 
 usePolling(load, () => POLL_MS)
 
-/** 按服务器分组，只展示有入站的服务器。 */
-const groups = computed(() =>
-  nodes.value
-    .map((node) => ({ node, items: inbounds.value.filter((i) => i.nodeId === node.id) }))
-    .filter((g) => g.items.length),
-)
+const nodeOf = computed(() => new Map(nodes.value.map((n) => [n.id, n])))
 
-function create(nodeId?: number) {
+function create() {
   if (!nodes.value.length) {
     message.info('请先在「服务器」中添加服务器')
     return
   }
   current.value = null
-  presetNode.value = nodeId
   showForm.value = true
 }
 
@@ -109,7 +117,7 @@ function remove(i: InboundItem) {
 
     <a-skeleton v-if="!loaded" active />
 
-    <div v-else-if="!groups.length" class="empty">
+    <div v-else-if="!inbounds.length" class="empty">
       <p class="empty-big">表单，<br />不是 JSON。</p>
       <p class="muted">选择协议组合与服务器，密钥、ShortID 与证书一键生成，保存后主控自动组装配置并下发。</p>
       <a-button type="primary" size="large" class="add" @click="create()">
@@ -118,47 +126,58 @@ function remove(i: InboundItem) {
       </a-button>
     </div>
 
-    <div v-else class="groups">
-      <section v-for="g in groups" :key="g.node.id" class="group">
-        <header class="g-head">
-          <span :class="['dot', { on: g.node.runtime.online }]" />
-          <h2>{{ g.node.name }}</h2>
-          <span class="mono muted host">{{ g.node.publicHost }}</span>
-          <SyncChip :node="g.node" @retried="load" />
-          <a-button size="small" class="g-add" @click="create(g.node.id)">
-            <Plus :size="14" />
-            添加
-          </a-button>
-        </header>
-
-        <TransitionGroup name="list" tag="ul" class="rows">
-          <li v-for="i in g.items" :key="i.id" :class="['row', { off: !i.enabled }]">
-            <a-switch size="small" :checked="i.enabled" :loading="toggling[i.id]" @change="(v: any) => toggle(i, !!v)" />
-            <div class="main">
-              <strong>{{ i.remark || '未命名' }}</strong>
-              <span class="tags">
-                <span v-for="t in tagsOf(i)" :key="t" class="tag">{{ t }}</span>
-              </span>
-            </div>
-            <span class="port mono">:{{ i.port }}</span>
-            <span class="sni mono muted">{{ hostOf(i) }}</span>
-            <div class="acts">
+    <template v-else>
+      <p class="muted hint">拖动左侧手柄调整顺序，订阅中的节点按此顺序输出。</p>
+      <div class="table" @dragenter.prevent @dragover.prevent @drop.prevent="sort.drop">
+        <a-table
+          :data-source="inbounds"
+          :columns="COLUMNS"
+          :custom-row="(r: InboundItem) => sort.itemProps(r.id)"
+          :row-class-name="(r: InboundItem) => (r.enabled ? '' : 'off')"
+          row-key="id"
+          size="middle"
+          :pagination="false"
+        >
+          <template #bodyCell="{ column, record }">
+            <span v-if="column.key === 'grip'" v-bind="sort.gripProps(record.id)"><GripVertical :size="16" /></span>
+            <a-switch
+              v-else-if="column.key === 'enabled'"
+              size="small"
+              :checked="record.enabled"
+              :loading="toggling[record.id]"
+              @change="(v: any) => toggle(record, !!v)"
+            />
+            <template v-else-if="column.key === 'name'">
+              <strong class="dim">{{ record.remark || '未命名' }}</strong>
+              <span class="brief mono muted dim">{{ record.nodeName }} · {{ record.port }}</span>
+            </template>
+            <span v-else-if="column.key === 'protocol'" class="tags dim">
+              <span v-for="t in tagsOf(record)" :key="t" class="tag">{{ t }}</span>
+            </span>
+            <span v-else-if="column.key === 'node'" class="server">
+              <span :class="['dot', { on: nodeOf.get(record.nodeId)?.runtime.online }]" />
+              <span class="server-name">{{ record.nodeName }}</span>
+              <SyncChip v-if="nodeOf.get(record.nodeId) && nodeOf.get(record.nodeId)!.syncState !== 'synced'" :node="nodeOf.get(record.nodeId)!" @retried="load" />
+            </span>
+            <span v-else-if="column.key === 'port'" class="mono dim">{{ record.port }}</span>
+            <span v-else-if="column.key === 'host'" class="mono muted sni dim">{{ hostOf(record) }}</span>
+            <div v-else-if="column.key === 'actions'" class="acts">
               <a-tooltip title="分享链接 / 二维码">
-                <button type="button" class="ghost" @click="share(i)"><QrCode :size="16" /></button>
+                <button type="button" class="ghost" @click="share(record)"><QrCode :size="16" /></button>
               </a-tooltip>
               <a-tooltip title="编辑">
-                <button type="button" class="ghost" @click="edit(i)"><Pencil :size="16" /></button>
+                <button type="button" class="ghost" @click="edit(record)"><Pencil :size="16" /></button>
               </a-tooltip>
               <a-tooltip title="删除">
-                <button type="button" class="ghost danger" @click="remove(i)"><Trash2 :size="16" /></button>
+                <button type="button" class="ghost danger" @click="remove(record)"><Trash2 :size="16" /></button>
               </a-tooltip>
             </div>
-          </li>
-        </TransitionGroup>
-      </section>
-    </div>
+          </template>
+        </a-table>
+      </div>
+    </template>
 
-    <InboundFormDrawer v-model:open="showForm" :inbound="current" :nodes="nodes" :preset-node-id="presetNode" @saved="load" />
+    <InboundFormDrawer v-model:open="showForm" :inbound="current" :nodes="nodes" @saved="load" />
     <ShareModal v-model:open="showShare" :inbound="current" />
   </section>
 </template>
@@ -190,45 +209,38 @@ h1 {
   align-items: center;
   gap: 8px;
 }
-.groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
-  align-items: start;
-  gap: 18px;
+.hint {
+  margin: -12px 0 14px;
+  font-size: 13px;
 }
-.group {
-  container-type: inline-size;
+.table {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
   overflow: hidden;
 }
-.g-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+.table :deep(.ant-table) {
+  background: transparent;
 }
-.g-head h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+.table :deep(tr.off) .dim {
+  opacity: 0.45;
 }
-.host {
+.brief {
+  display: none;
   font-size: 12px;
-  margin-right: auto;
 }
-.g-add {
+.server {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 4px 8px;
+}
+.server-name {
+  white-space: nowrap;
 }
 .dot {
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -237,59 +249,9 @@ h1 {
 .dot.on {
   background: var(--ok);
 }
-.rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.row {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1.4fr) 90px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 18px;
-  transition: background 0.15s, opacity 0.2s;
-}
-.row + .row {
-  border-top: 1px dashed var(--border);
-}
-/* 卡片较窄时（宽屏多列）把伪装目标 / SNI 移到第二行，避免名称与标签被挤压。 */
-@container (max-width: 640px) {
-  .row {
-    grid-template-columns: 44px minmax(0, 1fr) auto auto;
-    row-gap: 2px;
-  }
-  .sni {
-    grid-column: 2 / 4;
-    grid-row: 2;
-  }
-  .acts {
-    grid-column: 4;
-    grid-row: 1 / 3;
-  }
-}
-.row:hover {
-  background: var(--surface-2);
-}
-.row.off .main,
-.row.off .port,
-.row.off .sni {
-  opacity: 0.45;
-}
-.main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-.main strong {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .tags {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 .tag {
@@ -301,17 +263,12 @@ h1 {
   border: 1px solid var(--border);
   color: var(--text-2);
 }
-.port {
-  font-size: 15px;
-}
 .sni {
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .acts {
   display: flex;
+  justify-content: flex-end;
   gap: 2px;
 }
 .ghost {
@@ -349,36 +306,16 @@ h1 {
 .empty .muted {
   margin: 0 0 24px;
 }
-.list-enter-active,
-.list-leave-active {
-  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.list-enter-from,
-.list-leave-to {
-  opacity: 0;
-  transform: translateX(-8px);
-}
-@media (max-width: 760px) {
-  .row {
-    grid-template-columns: 44px minmax(0, 1fr) auto;
-  }
-  .sni {
+@media (max-width: 767px) {
+  .hint {
     display: none;
   }
-  .port {
-    grid-column: 2;
-    grid-row: 2;
-    font-size: 12px;
-  }
-  .acts {
-    grid-column: 3;
-    grid-row: 1 / 3;
-  }
-  .host {
-    display: none;
-  }
-  .g-head {
-    flex-wrap: wrap;
+}
+@media (max-width: 575px) {
+  .brief {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 </style>

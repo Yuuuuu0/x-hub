@@ -73,6 +73,21 @@ func (s *Store) insertWithID(table, query string, args ...any) (int64, error) {
 	return id, tx.Commit()
 }
 
+// reorder 按 ids 的先后写入 table 的 sort 列。
+func (s *Store) reorder(table string, ids []int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for i, id := range ids {
+		if _, err := tx.Exec("UPDATE "+table+" SET sort = ? WHERE id = ?", i, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // Close 关闭数据库。
 func (s *Store) Close() error { return s.db.Close() }
 

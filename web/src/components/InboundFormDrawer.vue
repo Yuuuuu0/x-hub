@@ -7,7 +7,7 @@ import { datetime } from '../lib/format'
 import { PRESETS, presetOf, type Preset } from '../lib/presets'
 
 // 新建或编辑入站：按协议组合显示 Reality / TLS / 传输 / Shadowsocks 参数区块。
-const props = defineProps<{ inbound: InboundItem | null; nodes: NodeItem[]; presetNodeId?: number }>()
+const props = defineProps<{ inbound: InboundItem | null; nodes: NodeItem[] }>()
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ saved: [] }>()
 
@@ -157,7 +157,7 @@ watch(open, async (v) => {
     return
   }
   Object.assign(form, {
-    nodeId: props.presetNodeId ?? props.nodes[0]?.id, remark: '', enabled: true, listen: '', port: 443,
+    nodeId: props.nodes[0]?.id, remark: '', enabled: true, listen: '', port: 443,
     linkHost: '', linkPort: 0, preset: PRESETS[0].key, spec: blankSpec(),
   })
   try {

@@ -1,16 +1,20 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/Yuuuuu0/x-hub/internal/master/auth"
+	"github.com/Yuuuuu0/x-hub/internal/master/compiler"
 	"github.com/Yuuuuu0/x-hub/internal/master/model"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 	"github.com/Yuuuuu0/x-hub/internal/master/sub"
@@ -218,5 +222,64 @@ func TestSharePage(t *testing.T) {
 	}
 	if rec := fetch("v2rayN/7.0", "*/*", "?format=page"); !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
 		t.Error("?format=page must return the share page")
+	}
+}
+
+// TestInboundOrder 覆盖入站排序：订阅节点跨服务器按面板顺序输出，新入站排在最后，调整顺序不改变下发给服务器的配置。
+func TestInboundOrder(t *testing.T) {
+	h := newTestHandler(t)
+	n1, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	n2, _ := h.Store.CreateNode("香港", "", "hk.example.com")
+	a := addInbound(t, h, n1, 1001, "A")
+	b := addInbound(t, h, n2, 1002, "B")
+	c := addInbound(t, h, n1, 1003, "C")
+	subID, _ := CreateSubscription(h.Store, "朋友A", "")
+	if err := h.Store.SetSubscriptionScope(subID, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := h.Store.GetSubscription(subID)
+	ports := func() []string {
+		plain, _ := base64.StdEncoding.DecodeString(fetchSub(h, s.Token, "", "").Body.String())
+		return regexp.MustCompile(`:100\d`).FindAllString(string(plain), -1)
+	}
+	if got := strings.Join(ports(), ""); got != ":1001:1002:1003" {
+		t.Fatalf("initial order: %s", got)
+	}
+
+	before, err := compiler.Node(h.Store, n1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Store.CreateAdmin("admin", auth.HashPassword("pass1234"))
+	login, _ := postLogin(h, map[string]string{"username": "admin", "password": "pass1234"})
+	body, _ := json.Marshal(map[string][]int64{"ids": {c, a, b}})
+	req := httptest.NewRequest(http.MethodPut, "/panel1234/api/inbounds/order", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, ck := range login.Result().Cookies() {
+		req.AddCookie(ck)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("reorder: %d %s", rec.Code, rec.Body)
+	}
+	if got := strings.Join(ports(), ""); got != ":1003:1001:1002" {
+		t.Fatalf("reordered: %s", got)
+	}
+	after, _ := compiler.Node(h.Store, n1)
+	if before.Hash != after.Hash {
+		t.Fatal("reordering must not change the compiled config")
+	}
+
+	addInbound(t, h, n2, 1004, "D")
+	if got := strings.Join(ports(), ""); got != ":1003:1001:1002:1004" {
+		t.Fatalf("new inbound must go last: %s", got)
+	}
+	n3, _ := h.Store.CreateNode("新加坡", "", "sg.example.com")
+	if err := h.Store.ReorderNodes([]int64{n2, n1, n3}); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := h.Store.ListNodes(); list[0].ID != n2 || list[2].ID != n3 {
+		t.Fatalf("node order: %d %d", list[0].ID, list[2].ID)
 	}
 }

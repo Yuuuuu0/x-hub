@@ -167,30 +167,29 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string, vars f
 	}
 	var out []Node
 	seen := map[string]int{}
-	// 按服务器排序输出，与面板展示一致。
-	for _, n := range nodes {
-		for _, in := range inbounds {
-			if in.NodeID != n.ID || !in.Enabled || s.AllInbounds == listed[in.ID] {
-				continue
-			}
-			spec, err := model.ParseSpec(in.Protocol, in.Spec)
-			if err != nil {
-				continue
-			}
-			t := Target(byID[in.NodeID], in, nameTemplate, vars(byID[in.NodeID]))
-			if t.Host == "" {
-				continue
-			}
-			if seen[t.Name]++; seen[t.Name] > 1 {
-				t.Name = fmt.Sprintf("%s %d", t.Name, seen[t.Name])
-			}
-			cred := model.CredentialFor(in.Protocol, spec, s.UUID, s.Secret, in.ID)
-			sb, _ := model.SingBox(in.Protocol, spec, t, cred)
-			out = append(out, Node{
-				Name: t.Name, InboundID: in.ID, Link: model.ShareLink(in.Protocol, spec, t, cred),
-				Mihomo: model.Mihomo(in.Protocol, spec, t, cred), SingBox: sb,
-			})
+	// 按入站顺序输出，与面板展示一致。
+	for _, in := range inbounds {
+		if !in.Enabled || s.AllInbounds == listed[in.ID] {
+			continue
 		}
+		spec, err := model.ParseSpec(in.Protocol, in.Spec)
+		if err != nil {
+			continue
+		}
+		n := byID[in.NodeID]
+		t := Target(n, in, nameTemplate, vars(n))
+		if t.Host == "" {
+			continue
+		}
+		if seen[t.Name]++; seen[t.Name] > 1 {
+			t.Name = fmt.Sprintf("%s %d", t.Name, seen[t.Name])
+		}
+		cred := model.CredentialFor(in.Protocol, spec, s.UUID, s.Secret, in.ID)
+		sb, _ := model.SingBox(in.Protocol, spec, t, cred)
+		out = append(out, Node{
+			Name: t.Name, InboundID: in.ID, Link: model.ShareLink(in.Protocol, spec, t, cred),
+			Mihomo: model.Mihomo(in.Protocol, spec, t, cred), SingBox: sb,
+		})
 	}
 	return out, nil
 }

@@ -64,6 +64,7 @@ func (h *Handler) Init() {
 	m.HandleFunc("POST /api/xray/batch-install", h.authed(h.batchInstall))
 	m.HandleFunc("GET /api/nodes", h.authed(h.listNodes))
 	m.HandleFunc("POST /api/nodes", h.authed(h.createNode))
+	m.HandleFunc("PUT /api/nodes/order", h.authed(h.reorder(h.Store.ReorderNodes)))
 	m.HandleFunc("PUT /api/nodes/{id}", h.authed(h.updateNode))
 	m.HandleFunc("DELETE /api/nodes/{id}", h.authed(h.deleteNode))
 	m.HandleFunc("POST /api/nodes/{id}/install-command", h.authed(h.installCommand))
@@ -73,6 +74,7 @@ func (h *Handler) Init() {
 	m.HandleFunc("POST /api/nodes/{id}/sync", h.authed(h.syncNode))
 	m.HandleFunc("GET /api/inbounds", h.authed(h.listInbounds))
 	m.HandleFunc("POST /api/inbounds", h.authed(h.createInbound))
+	m.HandleFunc("PUT /api/inbounds/order", h.authed(h.reorder(h.Store.ReorderInbounds)))
 	m.HandleFunc("PUT /api/inbounds/{id}", h.authed(h.updateInbound))
 	m.HandleFunc("DELETE /api/inbounds/{id}", h.authed(h.deleteInbound))
 	m.HandleFunc("GET /api/inbounds/{id}/links", h.authed(h.inboundLinks))
@@ -262,6 +264,24 @@ func (h *Handler) isHTTPS(r *http.Request) bool {
 		return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 	}
 	return false
+}
+
+// reorder 返回保存列表顺序的处理函数，请求体的 ids 为调整后的顺序。只影响展示与订阅输出，不下发配置。
+func (h *Handler) reorder(save func(ids []int64) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			IDs []int64 `json:"ids"`
+		}
+		if err := readJSON(r, &in); err != nil {
+			writeError(w, http.StatusBadRequest, "请求格式错误")
+			return
+		}
+		if err := save(in.IDs); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func readJSON(r *http.Request, v any) error {

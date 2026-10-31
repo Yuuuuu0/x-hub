@@ -100,6 +100,7 @@ function onMenu({ key }: { key: string | number }) {
 <template>
   <article :class="['card', status]">
     <header class="top">
+      <slot name="grip" />
       <span :class="['dot', status]" />
       <div class="title">
         <h3>

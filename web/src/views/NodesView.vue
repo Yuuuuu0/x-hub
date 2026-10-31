@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
-import { Layers, Plus } from 'lucide-vue-next'
+import { GripVertical, Layers, Plus } from 'lucide-vue-next'
 import { api, type CountryItem, type NodeItem } from '../lib/api'
 import { usePolling } from '../lib/poll'
+import { useDragSort } from '../lib/dragSort'
 import { bytesParts } from '../lib/format'
 import NodeCard from '../components/NodeCard.vue'
 import NodeFormModal from '../components/NodeFormModal.vue'
@@ -29,10 +30,12 @@ const showVersions = ref(false)
 const showLogs = ref(false)
 const showBatch = ref(false)
 
+const sort = useDragSort(nodes, 'nodes/order', load)
+
 async function load() {
   try {
     const r = await api.get<{ nodes: NodeItem[]; agentVersion: string; countries: CountryItem[] }>('nodes')
-    nodes.value = r.nodes
+    if (!sort.busy.value) nodes.value = r.nodes
     agentVersion.value = r.agentVersion
     countries.value = r.countries
   } catch (e: any) {
@@ -161,9 +164,10 @@ function remove(n: NodeItem) {
       </a-button>
     </div>
 
-    <TransitionGroup v-else name="list" tag="div" class="grid">
+    <TransitionGroup v-else name="list" tag="div" class="grid" @dragenter.prevent @dragover.prevent @drop.prevent="sort.drop">
       <NodeCard
         v-for="n in nodes"
+        v-bind="sort.itemProps(n.id)"
         :key="n.id"
         :node="n"
         :agent-version="agentVersion"
@@ -175,7 +179,11 @@ function remove(n: NodeItem) {
         @remove="remove(n)"
         @xray="(a) => xray(n, a)"
         @synced="load"
-      />
+      >
+        <template #grip>
+          <span v-bind="sort.gripProps(n.id)"><GripVertical :size="16" /></span>
+        </template>
+      </NodeCard>
     </TransitionGroup>
 
     <NodeFormModal v-model:open="showForm" :node="current" :countries="countries" @saved="onSaved" />
@@ -296,7 +304,8 @@ h1 {
 }
 
 .list-enter-active,
-.list-leave-active {
+.list-leave-active,
+.list-move {
   transition: all 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
