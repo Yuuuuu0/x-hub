@@ -10,6 +10,7 @@ import (
 
 	"github.com/Yuuuuu0/x-hub/internal/master/model"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
+	"github.com/Yuuuuu0/x-hub/internal/shared/xraycap"
 )
 
 // Format 为订阅输出格式。
@@ -73,10 +74,19 @@ type NameVars struct {
 	Days    string // 距 VPS 到期的天数，如 69D
 }
 
+// realityMLKEMAfter 之后的 Xray 版本，Mihomo 需要开启 support-x25519mlkem768 才能连接 Reality 入站。
+var realityMLKEMAfter = xraycap.Version{Major: 26, Minor: 7, Patch: 28}
+
+// realityNeedsMLKEM 判断该版本的 Xray 是否要求 Mihomo 开启 support-x25519mlkem768，版本未知时返回 false。
+func realityNeedsMLKEM(version string) bool {
+	v, ok := xraycap.ParseVersion(version)
+	return ok && v.Compare(realityMLKEMAfter) > 0
+}
+
 // Target 计算入站对外的连接信息与按模板生成的名称。模板变量：{node} 服务器名称、{remark} 入站备注、
 // {port} 端口、{flag} 旗帜、{region} 地区、{traffic} 剩余流量、{days} 剩余天数。
 func Target(n *store.Node, in *store.Inbound, nameTemplate string, v NameVars) model.LinkTarget {
-	t := model.LinkTarget{Host: in.LinkHost, Port: in.LinkPort}
+	t := model.LinkTarget{Host: in.LinkHost, Port: in.LinkPort, RealityMLKEM: realityNeedsMLKEM(n.XrayVersion)}
 	if t.Host == "" {
 		t.Host = n.PublicHost
 	}

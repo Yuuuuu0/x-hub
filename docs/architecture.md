@@ -168,6 +168,7 @@ Inbound
 - 全局 Xray 行为（屏蔽 BT、屏蔽私有 IP、IPv4/IPv6 优先、DNS）以开关呈现。
 - 较新的协议特性默认关闭并标注"部分客户端不支持"，默认产物保证主流客户端（含 Shadowrocket）可用。
 - Xray v26.3.27 之后的版本在 `minClientVer` 留空时默认拒绝低于 26.3.27 的客户端。第三方 Reality 客户端上报的版本很低（Mihomo 源码固定为 1.8.2，已实测被拒），因此表单提供「兼容第三方客户端」开关，新建入站默认开启（`minClientVer = 1.8.0`），只用 Xray 内核客户端时可关闭以遵循 Xray 默认值。
+- 服务器的 Xray 版本大于 v26.7.28 时，Mihomo 输出的 `reality-opts` 增加 `support-x25519mlkem768: true`，否则 Mihomo 无法连接。版本取被控端上报的值，未知时不输出；外部节点的服务端版本未知，保持原样。
 - 默认目标为 `dl.google.com:443`；快选列表不含 Xray 告警的 apple / icloud / microsoft 类域名（实测 `www.microsoft.com` 在部分网络下 Reality 握手失败），命中告警规则时表单给出提示。
 
 ## 7. 订阅与凭据

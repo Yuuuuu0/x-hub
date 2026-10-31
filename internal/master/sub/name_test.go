@@ -32,3 +32,11 @@ func TestFormatRemaining(t *testing.T) {
 		}
 	}
 }
+
+func TestRealityNeedsMLKEM(t *testing.T) {
+	for v, want := range map[string]bool{"v26.7.11": false, "v26.7.28": false, "v26.7.29": true, "26.10.31": true, "v27.1.1": true, "": false} {
+		if got := realityNeedsMLKEM(v); got != want {
+			t.Errorf("%q: got %v, want %v", v, got, want)
+		}
+	}
+}

@@ -283,3 +283,22 @@ func TestInboundOrder(t *testing.T) {
 		t.Fatalf("node order: %d %d", list[0].ID, list[2].ID)
 	}
 }
+
+// TestRealityMLKEMByXrayVersion 覆盖 Mihomo 输出按服务器的 Xray 版本决定是否开启 support-x25519mlkem768。
+func TestRealityMLKEMByXrayVersion(t *testing.T) {
+	h := newTestHandler(t)
+	n, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	addInbound(t, h, n, 443, "主力")
+	subID, _ := CreateSubscription(h.Store, "朋友A", "")
+	h.Store.SetSubscriptionScope(subID, true, nil)
+	s, _ := h.Store.GetSubscription(subID)
+	for version, want := range map[string]int{"": 0, "v26.7.28": 0, "v26.7.29": 1, "v26.10.31": 1} {
+		if err := h.Store.UpdateNodeXray(n, version, nil); err != nil {
+			t.Fatal(err)
+		}
+		body := fetchSub(h, s.Token, "clash.meta", "?format=mihomo").Body.String()
+		if got := strings.Count(body, "support-x25519mlkem768: true"); got != want {
+			t.Errorf("%q: got %d, want %d\n%s", version, got, want, body)
+		}
+	}
+}

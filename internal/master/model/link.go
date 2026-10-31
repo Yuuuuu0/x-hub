@@ -14,6 +14,8 @@ type LinkTarget struct {
 	Host string // 客户端连接地址：入站覆盖地址或服务器公网地址
 	Port int
 	Name string // 链接备注
+
+	RealityMLKEM bool // 服务器的 Xray 要求 Mihomo 开启 support-x25519mlkem768
 }
 
 // clientInfo 汇总客户端视角的安全层参数，供各输出格式复用。
@@ -127,8 +129,9 @@ type MihomoProxy struct {
 
 // RealityOpts 为 Mihomo 的 Reality 参数。
 type RealityOpts struct {
-	PublicKey string `yaml:"public-key"`
-	ShortID   string `yaml:"short-id"`
+	PublicKey    string `yaml:"public-key"`
+	ShortID      string `yaml:"short-id"`
+	SupportMLKEM bool   `yaml:"support-x25519mlkem768,omitempty"`
 }
 
 // WSOpts 为 Mihomo 的 WebSocket 参数。
@@ -170,7 +173,7 @@ func Mihomo(protocol string, s *Spec, t LinkTarget, cred Credential) MihomoProxy
 		p.ALPN = s.TLS.ALPN
 	}
 	if s.Security == SecurityReality {
-		p.RealityOpts = &RealityOpts{PublicKey: s.Reality.PublicKey, ShortID: s.Reality.ShortIDs[0]}
+		p.RealityOpts = &RealityOpts{PublicKey: s.Reality.PublicKey, ShortID: s.Reality.ShortIDs[0], SupportMLKEM: t.RealityMLKEM}
 	}
 	p.Network = s.Network
 	switch s.Network {
