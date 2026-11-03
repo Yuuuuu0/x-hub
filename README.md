@@ -2,6 +2,13 @@
 
 一个面板管理你所有的 VPS 代理节点，并分享给朋友和家人。
 
+**[在线演示](https://yuuuuu0.github.io/x-hub/)**：纯前端演示，数据均为虚构，修改不会保存。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/nodes-dark.webp">
+  <img src="docs/screenshots/nodes.webp" alt="服务器总览：在线状态、实时网速、CPU / 内存 / 磁盘与本月流量">
+</picture>
+
 x-hub 适合**自己用、顺便分给亲友**的场景：
 
 - **像 3x-ui 一样用表单配置节点**，不用手写 Xray JSON；
@@ -46,6 +53,16 @@ x-hub 适合**自己用、顺便分给亲友**的场景：
 **其他**
 - 两步验证（TOTP）登录
 - 一键备份，命令行恢复
+
+## 界面预览
+
+| 入站 | 订阅 |
+|---|---|
+| ![入站列表：协议组合、所属服务器、端口与伪装域名](docs/screenshots/inbounds.webp) | ![订阅卡片：每人一份订阅，用量、到期时间与在线设备](docs/screenshots/subscriptions.webp) |
+| **流量明细** | **外部节点** |
+| ![订阅流量：每日用量图表与各入站明细](docs/screenshots/traffic.webp) | ![外部节点：住宅 IP 链式代理与机场订阅](docs/screenshots/external.webp) |
+| **分流方案** | **分享页（发给使用者的订阅链接）** |
+| ![分流方案编辑：分组按名称正则收纳节点](docs/screenshots/profile.webp) | ![订阅分享页：用量、到期、二维码与各格式订阅内容](docs/screenshots/share.webp) |
 
 ## 准备
 
