@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>通用（节点链接） · Bob</title>
+<style>
+:root {
+  --bg: #f4f3ee; --surface: #fff; --surface-2: #f8f7f3; --border: #e3e1d9; --text: #0b0d12; --text-2: #4a4d57; --text-3: #8a8c94;
+  --lime: #c6ff3d; --ink: #0b0d12; --ok: #17a34a; --code-bg: #0b0d12; --code: #d8f7a0; --gutter: #4b505c;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #090a0d; --surface: #111318; --surface-2: #161920; --border: #22262f; --text: #eef0f3; --text-2: #a9adb8; --text-3: #6b707c; --ok: #4ade80; --code-bg: #111318; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif; }
+header {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border);
+}
+.title { flex: 1; min-width: 0; }
+.title h1 { margin: 0; font-size: 17px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title p { margin: 0; font: 12px var(--mono); color: var(--text-3); }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13px;
+  text-decoration: none; cursor: pointer; transition: border-color .15s;
+}
+.btn:hover { border-color: var(--text-3); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+@media (prefers-color-scheme: dark) { .btn.primary { background: var(--lime); border-color: var(--lime); color: var(--ink); } }
+.btn.on, .btn.done { border-color: var(--ok); color: var(--ok); }
+.btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+main { padding: 16px; }
+pre {
+  margin: 0; padding: 16px 18px; border-radius: 12px; background: var(--code-bg); color: var(--code); border: 1px solid #22262f;
+  font: 12.5px/1.7 var(--mono); overflow-x: auto; tab-size: 2; min-height: calc(100vh - 120px);
+}
+pre.wrap { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+  <a class="btn" href="./"><svg viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>返回</a>
+  <div class="title">
+    <h1>通用（节点链接）</h1>
+    <p>Bob · 2 行</p>
+  </div>
+  <div class="acts">
+    <button class="btn" type="button" id="wrap"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><path d="m16 16-2 2 2 2"/><path d="M3 18h7"/></svg>自动换行</button>
+    <button class="btn" type="button" id="copy"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制全部</span></button>
+    <a class="btn primary" href="base64.txt" download="x-hub-Bob.txt"><svg viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>下载</a>
+  </div>
+</header>
+<main><pre id="content">vless://a75981bc-da0d-4940-9849-f8be15471c20@203.0.113.11:443?encryption=none&amp;flow=xtls-rprx-vision&amp;fp=chrome&amp;headerType=none&amp;pbk=RzpsIEu9EPi4RxxIGASfpNUddRb1DxOqiQ4xsQs0PCA&amp;security=reality&amp;sid=316ac17b64508e53&amp;sni=www.microsoft.com&amp;spx=%2F&amp;type=tcp#%F0%9F%87%AF%F0%9F%87%B5%20%E6%97%A5%E6%9C%AC-acck%7C%F0%9F%93%8A2TB%7C%E2%8F%B369D
+vless://a75981bc-da0d-4940-9849-f8be15471c20@203.0.113.33:443?encryption=none&amp;flow=xtls-rprx-vision&amp;fp=chrome&amp;headerType=none&amp;pbk=AR3lLVsgXuLghEo3KMGPHoQCC_t35GlX88xqWnzyJng&amp;security=reality&amp;sid=1619dd42f23dabdc&amp;sni=www.amazon.com&amp;spx=%2F&amp;type=tcp#%F0%9F%87%B8%F0%9F%87%AC%20%E6%96%B0%E5%8A%A0%E5%9D%A1-sg%7C%F0%9F%93%8A1TB%7C%E2%8F%B323D</pre></main>
+<script>
+const pre = document.getElementById('content')
+document.getElementById('wrap').addEventListener('click', (e) => {
+  e.currentTarget.classList.toggle('on', pre.classList.toggle('wrap'))
+})
+
+document.getElementById('copy').addEventListener('click', async (e) => {
+  const btn = e.currentTarget
+  let ok = false
+  try {
+    await navigator.clipboard.writeText(pre.textContent)
+    ok = true
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = pre.textContent
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try { ok = document.execCommand('copy') } catch {}
+    ta.remove()
+  }
+  const label = btn.querySelector('span')
+  label.textContent = ok ? '已复制' : '复制失败'
+  btn.classList.toggle('done', ok)
+  setTimeout(() => { label.textContent = '复制全部'; btn.classList.remove('done') }, 1800)
+})
+</script>
+</body>
+</html>

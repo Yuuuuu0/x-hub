@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { Check, Copy, ExternalLink } from 'lucide-vue-next'
 import QRCode from 'qrcode'
-import type { Subscription } from '../lib/api'
+import { DEMO, type Subscription } from '../lib/api'
 import { copyText } from '../lib/clipboard'
 
 // 订阅链接：自动识别客户端，也可显式指定格式。
@@ -30,6 +30,8 @@ const link = computed(() => {
   return !u || format.value === 'auto' ? u : `${u}?format=${format.value}`
 })
 const hint = computed(() => FORMATS.find((f) => f.value === format.value)?.hint)
+// 演示环境没有主控，分享页为构建时预先生成的静态页面
+const sharePage = computed(() => (DEMO ? `./share/${props.sub?.token}/` : `${props.sub?.url}?format=page`))
 
 watch(open, (v) => v && (format.value = 'auto'))
 watch(link, async (l) => {
@@ -61,7 +63,7 @@ async function copy() {
       </a-button>
       <div class="share">
         <p class="muted">把「自动识别」链接直接发给使用者，用浏览器打开即可看到用量、到期时间，并查看或下载各客户端的订阅内容。</p>
-        <a-button :href="`${sub.url}?format=page`" target="_blank" rel="noopener" class="share-btn">
+        <a-button :href="sharePage" target="_blank" rel="noopener" class="share-btn">
           <ExternalLink :size="14" />预览分享页
         </a-button>
       </div>

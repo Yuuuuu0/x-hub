@@ -1,19 +1,21 @@
-"""生成演示环境的预置数据 web/src/demo/fixtures.json。
+"""生成演示环境的预置数据 web/src/demo/fixtures.json 与静态分享页 web/src/demo/public/share/。
 
 向一个全新的本地主控写入演示数据（服务器、入站、订阅、外部节点、分流方案），
 抓取各接口的真实响应，再补上被控端在线时才有的运行数据（心跳、网速、用量等）。
+各订阅的分享页及其各格式内容同样由主控渲染，保存为静态文件，演示环境中的「预览分享页」打开它们。
 
 用法：
   make master
   ./dist/xhub-master settings proxy --data /tmp/xhub-demo --public-url https://hub.example.com --trusted 127.0.0.1/32
   ./dist/xhub-master --data /tmp/xhub-demo        # 日志中打印面板路径与初始密码
-  python3 web/src/demo/fixtures.py http://127.0.0.1:2096/<面板路径>/api/ <初始密码>
+  python3 web/src/demo/fixtures.py http://127.0.0.1:2096/<面板路径>/api/ <初始密码> /tmp/xhub-demo
 """
-import json, os, sys, time, urllib.error, urllib.request
+import html, json, os, shutil, sqlite3, sys, time, urllib.error, urllib.parse, urllib.request
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
 BASE = sys.argv[1]
 PW = sys.argv[2]
+DATA_DIR = sys.argv[3]
 op = urllib.request.build_opener()
 COOKIE = {}
 
@@ -170,3 +172,41 @@ src.update(kind='remote', content='https://airport.example/api/v1/client/subscri
 d['capturedAt'] = now
 json.dump(d, open(os.path.join(ROOT, 'web/src/demo/fixtures.json'), 'w'), ensure_ascii=False, separators=(',', ':'))
 print('已写入 web/src/demo/fixtures.json')
+
+
+# ---- 静态分享页 ----
+# 分享页按数据库中的用量渲染，先把上面补充的用量与方案写回数据库。
+db = sqlite3.connect(os.path.join(DATA_DIR, 'xhub.db'))
+for s in d['subscriptions']['subscriptions']:
+    db.execute('UPDATE subscriptions SET used_up = ?, used_down = ?, profile_id = ? WHERE id = ?', (s['usedUp'], s['usedDown'], s['profileId'], s['id']))
+db.commit()
+db.close()
+
+ORIGIN = '{0.scheme}://{0.netloc}'.format(urllib.parse.urlparse(BASE))
+FORMATS = {'mihomo': '.yaml', 'singbox': '.json', 'base64': '.txt', 'shadowrocket': '.conf'}
+OUT = os.path.join(ROOT, 'web/src/demo/public/share')
+shutil.rmtree(OUT, ignore_errors=True)
+
+
+def fetch(path):
+    return urllib.request.urlopen(urllib.request.Request(ORIGIN + path, headers={'User-Agent': 'Mozilla/5.0'})).read().decode()
+
+
+for s in d['subscriptions']['subscriptions']:
+    path = urllib.parse.urlparse(s['url']).path  # /<订阅路径>/<token>
+    out = os.path.join(OUT, s['token'])
+    os.makedirs(out)
+    page = fetch(path + '?format=page')
+    for f, ext in FORMATS.items():
+        file = f + ext
+        save_as = html.escape(f'x-hub-{s["name"]}{ext}')
+        # 查看页与下载改为同目录下的静态文件
+        page = page.replace(f'href="{s["url"]}?format={f}&amp;view=1"', f'href="{f}.html"')
+        page = page.replace(f'href="{s["url"]}?format={f}&amp;download=1" download', f'href="{file}" download="{save_as}"')
+        viewer = fetch(f'{path}?format={f}&view=1')
+        viewer = viewer.replace(f'href="{path}?format={f}&amp;download=1" download', f'href="{file}" download="{save_as}"')
+        viewer = viewer.replace(f'href="{path}?format=page"', 'href="./"')
+        open(os.path.join(out, f + '.html'), 'w').write(viewer)
+        open(os.path.join(out, file), 'w').write(fetch(f'{path}?format={f}&download=1'))
+    open(os.path.join(out, 'index.html'), 'w').write(page)
+print('已写入 web/src/demo/public/share/')

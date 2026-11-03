@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Mihomo · Alice</title>
+<style>
+:root {
+  --bg: #f4f3ee; --surface: #fff; --surface-2: #f8f7f3; --border: #e3e1d9; --text: #0b0d12; --text-2: #4a4d57; --text-3: #8a8c94;
+  --lime: #c6ff3d; --ink: #0b0d12; --ok: #17a34a; --code-bg: #0b0d12; --code: #d8f7a0; --gutter: #4b505c;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #090a0d; --surface: #111318; --surface-2: #161920; --border: #22262f; --text: #eef0f3; --text-2: #a9adb8; --text-3: #6b707c; --ok: #4ade80; --code-bg: #111318; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif; }
+header {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border);
+}
+.title { flex: 1; min-width: 0; }
+.title h1 { margin: 0; font-size: 17px; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title p { margin: 0; font: 12px var(--mono); color: var(--text-3); }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 13px;
+  text-decoration: none; cursor: pointer; transition: border-color .15s;
+}
+.btn:hover { border-color: var(--text-3); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+@media (prefers-color-scheme: dark) { .btn.primary { background: var(--lime); border-color: var(--lime); color: var(--ink); } }
+.btn.on, .btn.done { border-color: var(--ok); color: var(--ok); }
+.btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+main { padding: 16px; }
+pre {
+  margin: 0; padding: 16px 18px; border-radius: 12px; background: var(--code-bg); color: var(--code); border: 1px solid #22262f;
+  font: 12.5px/1.7 var(--mono); overflow-x: auto; tab-size: 2; min-height: calc(100vh - 120px);
+}
+pre.wrap { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+  <a class="btn" href="./"><svg viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>返回</a>
+  <div class="title">
+    <h1>Mihomo</h1>
+    <p>Alice · 483 行</p>
+  </div>
+  <div class="acts">
+    <button class="btn" type="button" id="wrap"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><path d="m16 16-2 2 2 2"/><path d="M3 18h7"/></svg>自动换行</button>
+    <button class="btn" type="button" id="copy"><svg viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>复制全部</span></button>
+    <a class="btn primary" href="mihomo.yaml" download="x-hub-Alice.yaml"><svg viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></svg>下载</a>
+  </div>
+</header>
+<main><pre id="content">mode: rule
+mixed-port: 7897
+allow-lan: false
+log-level: info
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: strict
+global-client-fingerprint: chrome
+# 域名嗅探（可选）
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  override-destination: false
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+      override-destination: false
+    QUIC:
+      ports: [443, 8443]
+      override-destination: false
+  skip-domain: # 忽略嗅探
+    - &#39;Mijia Cloud&#39;
+    - &#39;&#43;.push.apple.com&#39;
+    - &#39;&#43;.wechat.com&#39;
+    - &#39;&#43;.qpic.cn&#39;
+    - &#39;&#43;.qq.com&#39;
+    - &#39;&#43;.wechatapp.com&#39;
+    #  语音通信
+    - &#39;&#43;.vivox.com&#39;
+    # 向日葵服务
+    - &#39;&#43;.oray.com&#39;
+    - &#39;&#43;.sunlogin.net&#39;
+  skip-dst-address:
+    - &#39;149.154.160.0/20&#39;
+    - &#39;185.76.151.0/24&#39;
+    - &#39;91.105.192.0/23&#39;
+    - &#39;91.108.16.0/21&#39;
+    - &#39;91.108.4.0/22&#39;
+    - &#39;91.108.56.0/22&#39;
+    - &#39;91.108.8.0/21&#39;
+    - &#39;95.161.64.0/20&#39;
+    - &#39;2001:67c:4e8::/48&#39;
+    - &#39;2001:b28:f23c::/47&#39;
+    - &#39;2001:b28:f23f::/48&#39;
+    - &#39;2a0a:f280::/29&#39;
+    - &#39;127.0.0.0/8&#39; # 本机回环
+    - &#39;10.0.0.0/8&#39; # A类私有
+    - &#39;172.16.0.0/12&#39; # B类私有
+    - &#39;192.168.0.0/16&#39; # C类私有
+    - &#39;169.254.0.0/16&#39; # 链路本地
+    - &#39;224.0.0.0/4&#39; # 组播地址
+    - &#39;240.0.0.0/4&#39; # 保留地址
+    - &#39;fc00::/7&#39; # IPv6 ULA
+    - &#39;fe80::/10&#39; # IPv6 链路本地
+    - &#39;::1/128&#39; # IPv6 本机回环
+# DNS
+dns:
+  enable: true
+  ipv6: false
+  cache-algorithm: arc
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  use-hosts: true
+  use-system-hosts: false
+  respect-rules: true
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fake-ip-filter:
+    - &#34;*.lan&#34;
+    - &#34;*.local&#34;
+    - &#34;&#43;.localhost&#34;
+  nameserver-policy:
+    &#34;geosite:cn,private&#34;:
+      - https://223.5.5.5/dns-query
+      - https://doh.pub/dns-query
+  nameserver:
+    - https://1.1.1.1/dns-query
+    - https://8.8.8.8/dns-query
+  proxy-server-nameserver:
+    - https://223.5.5.5/dns-query
+    - https://doh.pub/dns-query
+tun:
+  enable: true
+  stack: system
+  dns-hijack:
+    - &#34;any:53&#34;
+    - &#34;tcp://any:53&#34;
+  auto-route: true
+  auto-redirect: true
+  auto-detect-interface: true
+  strict-route: true
+profile:
+  store-selected: true
+  store-fake-ip: true
+proxies:
+  - name: &#34;🇯🇵 日本-acck|📊2TB|⏳69D&#34;
+    type: vless
+    server: 203.0.113.11
+    port: 443
+    uuid: e71b4cfb-17a1-42bc-bced-5a22b9c974ce
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.microsoft.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: RzpsIEu9EPi4RxxIGASfpNUddRb1DxOqiQ4xsQs0PCA
+      short-id: 316ac17b64508e53
+  - name: &#34;🇯🇵 日本-xhttp|📊2TB|⏳69D&#34;
+    type: vless
+    server: 203.0.113.11
+    port: 8443
+    uuid: e71b4cfb-17a1-42bc-bced-5a22b9c974ce
+    network: xhttp
+    udp: true
+    tls: true
+    servername: www.apple.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: txsL21Ub16Rs9c4hqm6jIS2b5wdF38GqPeNZS3-272A
+      short-id: 45d26d451e9be3e2
+    xhttp-opts:
+      path: /xh
+      host: www.apple.com
+      mode: auto
+  - name: &#34;🇭🇰 香港-hkt|📊1TB|⏳142D&#34;
+    type: vless
+    server: 203.0.113.22
+    port: 443
+    uuid: e71b4cfb-17a1-42bc-bced-5a22b9c974ce
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.cloudflare.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: 71VjXF9C-Gd7j3ZO--y4XtHd3JPfVvTogjnW9yZVr1g
+      short-id: 84dc856c9163c284
+  - name: &#34;🇭🇰 香港-cdn|📊1TB|⏳142D&#34;
+    type: vless
+    server: 203.0.113.22
+    port: 2083
+    uuid: e71b4cfb-17a1-42bc-bced-5a22b9c974ce
+    network: ws
+    udp: true
+    tls: true
+    servername: hk.example.com
+    alpn:
+      - h2
+      - http/1.1
+    client-fingerprint: chrome
+    ws-opts:
+      path: /ws
+      headers:
+        Host: hk.example.com
+  - name: &#34;🇸🇬 新加坡-sg|📊1TB|⏳23D&#34;
+    type: vless
+    server: 203.0.113.33
+    port: 443
+    uuid: e71b4cfb-17a1-42bc-bced-5a22b9c974ce
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.amazon.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AR3lLVsgXuLghEo3KMGPHoQCC_t35GlX88xqWnzyJng
+      short-id: 1619dd42f23dabdc
+  - name: &#34;🇸🇬 新加坡-trojan|📊1TB|⏳23D&#34;
+    type: trojan
+    server: 203.0.113.33
+    port: 8443
+    password: 0accc5d691b56ecf13f9cb527a03f849
+    network: tcp
+    udp: true
+    sni: sg.example.com
+    alpn:
+      - h2
+      - http/1.1
+    client-fingerprint: chrome
+  - name: &#34;🇺🇸 洛杉矶-cn2|📊3TB|⏳301D&#34;
+    type: vless
+    server: 198.51.100.44
+    port: 443
+    uuid: e71b4cfb-17a1-42bc-bced-5a22b9c974ce
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.nvidia.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: EYLTse316KuZJGAcNkrSpl1EFS5dMb0wW36OsINkSgc
+      short-id: 9808f4a250800f0a
+  - name: &#34;[备用] 🇭🇰 香港 01&#34;
+    type: hysteria2
+    server: hk1.airport.example
+    port: 443
+    password: pw
+    sni: hk1.airport.example
+  - name: &#34;[备用] 🇭🇰 香港 02&#34;
+    type: hysteria2
+    server: hk2.airport.example
+    port: 443
+    password: pw
+    sni: hk2.airport.example
+  - name: &#34;[备用] 🇹🇼 台湾 01&#34;
+    type: trojan
+    server: tw1.airport.example
+    port: 443
+    password: pw
+    sni: tw1.airport.example
+    udp: true
+  - name: &#34;[备用] 🇯🇵 日本 01&#34;
+    type: trojan
+    server: jp1.airport.example
+    port: 443
+    password: pw
+    sni: jp1.airport.example
+    udp: true
+  - name: &#34;[备用] 🇺🇸 美国 01&#34;
+    type: trojan
+    server: us1.airport.example
+    port: 443
+    password: pw
+    sni: us1.airport.example
+    udp: true
+proxy-groups:
+  - name: &#34;🌐 日常上网&#34;
+    type: select
+    proxies:
+      - &#34;🇭🇰 香港节点&#34;
+      - &#34;🇯🇵 日本节点&#34;
+      - &#34;🇸🇬 新加坡节点&#34;
+      - &#34;🇺🇸 美国节点&#34;
+      - &#34;🇩🇪 德国节点&#34;
+      - &#34;🏠 家宽&#34;
+      - &#34;🌍 其他节点&#34;
+      - DIRECT
+  - name: &#34;🎬 流媒体&#34;
+    type: select
+    proxies:
+      - &#34;🇺🇸 美国节点&#34;
+      - &#34;🇯🇵 日本节点&#34;
+      - &#34;🇩🇪 德国节点&#34;
+      - &#34;🇸🇬 新加坡节点&#34;
+      - &#34;🇭🇰 香港节点&#34;
+      - DIRECT
+  - name: &#34;🇭🇰 香港节点&#34;
+    type: select
+    proxies:
+      - &#34;🇭🇰 香港-hkt|📊1TB|⏳142D&#34;
+      - &#34;🇭🇰 香港-cdn|📊1TB|⏳142D&#34;
+      - &#34;[备用] 🇭🇰 香港 01&#34;
+      - &#34;[备用] 🇭🇰 香港 02&#34;
+  - name: &#34;🇯🇵 日本节点&#34;
+    type: select
+    proxies:
+      - &#34;🇯🇵 日本-acck|📊2TB|⏳69D&#34;
+      - &#34;🇯🇵 日本-xhttp|📊2TB|⏳69D&#34;
+      - &#34;[备用] 🇯🇵 日本 01&#34;
+  - name: &#34;🇺🇸 美国节点&#34;
+    type: select
+    proxies:
+      - &#34;[备用] 🇺🇸 美国 01&#34;
+  - name: &#34;🇸🇬 新加坡节点&#34;
+    type: select
+    proxies:
+      - &#34;🇸🇬 新加坡-sg|📊1TB|⏳23D&#34;
+      - &#34;🇸🇬 新加坡-trojan|📊1TB|⏳23D&#34;
+  - name: &#34;🇩🇪 德国节点&#34;
+    type: select
+    proxies:
+      - DIRECT
+  - name: &#34;🏠 家宽&#34;
+    type: select
+    proxies:
+      - DIRECT
+  - name: &#34;🌍 其他节点&#34;
+    type: select
+    proxies:
+      - &#34;🇺🇸 洛杉矶-cn2|📊3TB|⏳301D&#34;
+      - &#34;[备用] 🇹🇼 台湾 01&#34;
+  - name: &#34;🐟 漏网之鱼&#34;
+    type: select
+    proxies:
+      - &#34;🌐 日常上网&#34;
+      - &#34;🎬 流媒体&#34;
+      - DIRECT
+  - name: &#34;🖧 本地直连&#34;
+    type: select
+    proxies:
+      - DIRECT
+  - name: &#34;🛡️ AdGuard&#34;
+    type: select
+    proxies:
+      - REJECT
+rule-providers:
+  MyReject:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyReject.yaml
+    path: ./ruleset/MyReject.yaml
+    interval: 86400
+  MyDirect:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyDirect.yaml
+    path: ./ruleset/MyDirect.yaml
+    interval: 86400
+  MyStreamCustom:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyStreamCustom.yaml
+    path: ./ruleset/MyStreamCustom.yaml
+    interval: 86400
+  MyCustom:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyCustom.yaml
+    path: ./ruleset/MyCustom.yaml
+    interval: 86400
+  AdGuardSDNSFilter:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/AdGuardSDNSFilter.yaml
+    path: ./ruleset/AdGuardSDNSFilter.yaml
+    interval: 86400
+  YouTube:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/YouTube.yaml
+    path: ./ruleset/YouTube.yaml
+    interval: 86400
+  Netflix:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Netflix.yaml
+    path: ./ruleset/Netflix.yaml
+    interval: 86400
+  Disney:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Disney.yaml
+    path: ./ruleset/Disney.yaml
+    interval: 86400
+  HBO:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/HBO.yaml
+    path: ./ruleset/HBO.yaml
+    interval: 86400
+  Spotify:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Spotify.yaml
+    path: ./ruleset/Spotify.yaml
+    interval: 86400
+  telegramcidr:
+    type: http
+    behavior: ipcidr
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/telegramcidr.yaml
+    path: ./ruleset/telegramcidr.yaml
+    interval: 86400
+  OpenAI:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/OpenAI.yaml
+    path: ./ruleset/OpenAI.yaml
+    interval: 86400
+  Claude:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Claude.yaml
+    path: ./ruleset/Claude.yaml
+    interval: 86400
+  ClaudeTelemetry:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ClaudeTelemetry.yaml
+    path: ./ruleset/ClaudeTelemetry.yaml
+    interval: 86400
+  Muse:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Muse.yaml
+    path: ./ruleset/Muse.yaml
+    interval: 86400
+  Gemini:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Gemini.yaml
+    path: ./ruleset/Gemini.yaml
+    interval: 86400
+  MyHome:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyHome.yaml
+    path: ./ruleset/MyHome.yaml
+    interval: 86400
+  Bing:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Bing.yaml
+    path: ./ruleset/Bing.yaml
+    interval: 86400
+  Google:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Google.yaml
+    path: ./ruleset/Google.yaml
+    interval: 86400
+  GitHub:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/GitHub.yaml
+    path: ./ruleset/GitHub.yaml
+    interval: 86400
+  proxy:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/proxy.yaml
+    path: ./ruleset/proxy.yaml
+    interval: 86400
+  gfw:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/gfw.yaml
+    path: ./ruleset/gfw.yaml
+    interval: 86400
+  ChinaMaxDomain:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ChinaMaxDomain.yaml
+    path: ./ruleset/ChinaMaxDomain.yaml
+    interval: 86400
+  ChinaMaxIPNoIPv6:
+    type: http
+    behavior: ipcidr
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ChinaMaxIPNoIPv6.yaml
+    path: ./ruleset/ChinaMaxIPNoIPv6.yaml
+    interval: 86400
+  lan:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/lan.yaml
+    path: ./ruleset/lan.yaml
+    interval: 86400
+rules:
+  - &#34;RULE-SET,MyReject,🛡️ AdGuard&#34;
+  - &#34;RULE-SET,MyDirect,🖧 本地直连&#34;
+  - &#34;RULE-SET,MyStreamCustom,🎬 流媒体&#34;
+  - &#34;RULE-SET,MyCustom,🌐 日常上网&#34;
+  - &#34;RULE-SET,AdGuardSDNSFilter,🛡️ AdGuard&#34;
+  - &#34;RULE-SET,YouTube,🎬 流媒体,no-resolve&#34;
+  - &#34;RULE-SET,Netflix,🎬 流媒体&#34;
+  - &#34;RULE-SET,Disney,🎬 流媒体&#34;
+  - &#34;RULE-SET,HBO,🎬 流媒体&#34;
+  - &#34;RULE-SET,Spotify,🎬 流媒体,no-resolve&#34;
+  - &#34;RULE-SET,telegramcidr,🎬 流媒体,no-resolve&#34;
+  - &#34;RULE-SET,OpenAI,🏠 家宽,no-resolve&#34;
+  - &#34;RULE-SET,Claude,🏠 家宽,no-resolve&#34;
+  - &#34;RULE-SET,ClaudeTelemetry,🏠 家宽,no-resolve&#34;
+  - &#34;RULE-SET,Muse,🏠 家宽,no-resolve&#34;
+  - &#34;RULE-SET,Gemini,🏠 家宽,no-resolve&#34;
+  - &#34;RULE-SET,MyHome,🏠 家宽&#34;
+  - &#34;RULE-SET,Bing,🌐 日常上网&#34;
+  - &#34;RULE-SET,Google,🌐 日常上网&#34;
+  - &#34;RULE-SET,GitHub,🌐 日常上网&#34;
+  - &#34;RULE-SET,proxy,🌐 日常上网&#34;
+  - &#34;RULE-SET,gfw,🌐 日常上网&#34;
+  - &#34;RULE-SET,ChinaMaxDomain,🖧 本地直连&#34;
+  - &#34;RULE-SET,ChinaMaxIPNoIPv6,🖧 本地直连,no-resolve&#34;
+  - &#34;RULE-SET,lan,🖧 本地直连,no-resolve&#34;
+  - &#34;GEOIP,CN,🖧 本地直连&#34;
+  - &#34;MATCH,🐟 漏网之鱼&#34;</pre></main>
+<script>
+const pre = document.getElementById('content')
+document.getElementById('wrap').addEventListener('click', (e) => {
+  e.currentTarget.classList.toggle('on', pre.classList.toggle('wrap'))
+})
+
+document.getElementById('copy').addEventListener('click', async (e) => {
+  const btn = e.currentTarget
+  let ok = false
+  try {
+    await navigator.clipboard.writeText(pre.textContent)
+    ok = true
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = pre.textContent
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try { ok = document.execCommand('copy') } catch {}
+    ta.remove()
+  }
+  const label = btn.querySelector('span')
+  label.textContent = ok ? '已复制' : '复制失败'
+  btn.classList.toggle('done', ok)
+  setTimeout(() => { label.textContent = '复制全部'; btn.classList.remove('done') }, 1800)
+})
+</script>
+</body>
+</html>

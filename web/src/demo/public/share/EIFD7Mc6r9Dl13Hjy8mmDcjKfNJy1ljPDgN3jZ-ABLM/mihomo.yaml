@@ -1,0 +1,54 @@
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+proxies:
+  - name: "🇯🇵 日本-acck|📊2TB|⏳69D"
+    type: vless
+    server: 203.0.113.11
+    port: 443
+    uuid: e73149f2-e91f-4256-9dee-c4c611dfd8e6
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.microsoft.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: RzpsIEu9EPi4RxxIGASfpNUddRb1DxOqiQ4xsQs0PCA
+      short-id: 316ac17b64508e53
+  - name: "🇭🇰 香港-hkt|📊1TB|⏳142D"
+    type: vless
+    server: 203.0.113.22
+    port: 443
+    uuid: e73149f2-e91f-4256-9dee-c4c611dfd8e6
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.cloudflare.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: 71VjXF9C-Gd7j3ZO--y4XtHd3JPfVvTogjnW9yZVr1g
+      short-id: 84dc856c9163c284
+proxy-groups:
+  - name: 节点选择
+    type: select
+    proxies:
+      - 自动选择
+      - DIRECT
+      - "🇯🇵 日本-acck|📊2TB|⏳69D"
+      - "🇭🇰 香港-hkt|📊1TB|⏳142D"
+  - name: 自动选择
+    type: url-test
+    proxies:
+      - "🇯🇵 日本-acck|📊2TB|⏳69D"
+      - "🇭🇰 香港-hkt|📊1TB|⏳142D"
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+rules:
+  - GEOIP,LAN,DIRECT,no-resolve
+  - GEOSITE,CN,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,节点选择

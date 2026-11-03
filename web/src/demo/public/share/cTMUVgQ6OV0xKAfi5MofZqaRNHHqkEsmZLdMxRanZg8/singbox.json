@@ -1,0 +1,270 @@
+{
+  "dns": {
+    "final": "remote",
+    "rules": [
+      {
+        "rule_set": "geosite-cn",
+        "server": "local"
+      }
+    ],
+    "servers": [
+      {
+        "server": "1.1.1.1",
+        "tag": "remote",
+        "type": "https"
+      },
+      {
+        "server": "223.5.5.5",
+        "tag": "local",
+        "type": "udp"
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "auto_route": true,
+      "strict_route": true,
+      "tag": "tun-in",
+      "type": "tun"
+    },
+    {
+      "listen": "127.0.0.1",
+      "listen_port": 2080,
+      "tag": "mixed-in",
+      "type": "mixed"
+    }
+  ],
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "outbounds": [
+        "自动选择",
+        "DIRECT",
+        "🇯🇵 日本-acck|📊2TB|⏳69D",
+        "🇭🇰 香港-hkt|📊1TB|⏳142D",
+        "🇭🇰 香港-cdn|📊1TB|⏳142D",
+        "🇸🇬 新加坡-sg|📊1TB|⏳23D",
+        "🇸🇬 新加坡-trojan|📊1TB|⏳23D",
+        "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D",
+        "🇩🇪 德国-relay"
+      ],
+      "tag": "节点选择",
+      "type": "selector"
+    },
+    {
+      "interval": "300s",
+      "outbounds": [
+        "🇯🇵 日本-acck|📊2TB|⏳69D",
+        "🇭🇰 香港-hkt|📊1TB|⏳142D",
+        "🇭🇰 香港-cdn|📊1TB|⏳142D",
+        "🇸🇬 新加坡-sg|📊1TB|⏳23D",
+        "🇸🇬 新加坡-trojan|📊1TB|⏳23D",
+        "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D",
+        "🇩🇪 德国-relay"
+      ],
+      "tag": "自动选择",
+      "tolerance": 50,
+      "type": "urltest",
+      "url": "https://www.gstatic.com/generate_204"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "203.0.113.11",
+      "server_port": 443,
+      "tag": "🇯🇵 日本-acck|📊2TB|⏳69D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "RzpsIEu9EPi4RxxIGASfpNUddRb1DxOqiQ4xsQs0PCA",
+          "short_id": "316ac17b64508e53"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "86335917-1795-4400-8c12-b7650419acd8"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "203.0.113.22",
+      "server_port": 443,
+      "tag": "🇭🇰 香港-hkt|📊1TB|⏳142D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "71VjXF9C-Gd7j3ZO--y4XtHd3JPfVvTogjnW9yZVr1g",
+          "short_id": "84dc856c9163c284"
+        },
+        "server_name": "www.cloudflare.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "86335917-1795-4400-8c12-b7650419acd8"
+    },
+    {
+      "server": "203.0.113.22",
+      "server_port": 2083,
+      "tag": "🇭🇰 香港-cdn|📊1TB|⏳142D",
+      "tls": {
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled": true,
+        "server_name": "hk.example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "transport": {
+        "headers": {
+          "Host": "hk.example.com"
+        },
+        "path": "/ws",
+        "type": "ws"
+      },
+      "type": "vless",
+      "uuid": "86335917-1795-4400-8c12-b7650419acd8"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "203.0.113.33",
+      "server_port": 443,
+      "tag": "🇸🇬 新加坡-sg|📊1TB|⏳23D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "AR3lLVsgXuLghEo3KMGPHoQCC_t35GlX88xqWnzyJng",
+          "short_id": "1619dd42f23dabdc"
+        },
+        "server_name": "www.amazon.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "86335917-1795-4400-8c12-b7650419acd8"
+    },
+    {
+      "password": "b79d01d1fc5ebc2c9feff4675b7578c7",
+      "server": "203.0.113.33",
+      "server_port": 8443,
+      "tag": "🇸🇬 新加坡-trojan|📊1TB|⏳23D",
+      "tls": {
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled": true,
+        "server_name": "sg.example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "trojan"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "198.51.100.44",
+      "server_port": 443,
+      "tag": "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "EYLTse316KuZJGAcNkrSpl1EFS5dMb0wW36OsINkSgc",
+          "short_id": "9808f4a250800f0a"
+        },
+        "server_name": "www.nvidia.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "86335917-1795-4400-8c12-b7650419acd8"
+    },
+    {
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "76M0e/X1IN2dVzNRj7voRg==:FPcjmVawxjmtXzDtKkxLSA==",
+      "server": "198.51.100.55",
+      "server_port": 23456,
+      "tag": "🇩🇪 德国-relay",
+      "type": "shadowsocks"
+    },
+    {
+      "tag": "DIRECT",
+      "type": "direct"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "local",
+    "final": "节点选择",
+    "rule_set": [
+      {
+        "download_detour": "DIRECT",
+        "format": "binary",
+        "tag": "geosite-cn",
+        "type": "remote",
+        "update_interval": "1d",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/geo/geosite-cn.srs"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "binary",
+        "tag": "geoip-cn",
+        "type": "remote",
+        "update_interval": "1d",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/geo/geoip-cn.srs"
+      }
+    ],
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "action": "hijack-dns",
+        "protocol": "dns"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "DIRECT"
+      },
+      {
+        "outbound": "DIRECT",
+        "rule_set": [
+          "geosite-cn"
+        ]
+      },
+      {
+        "action": "resolve"
+      },
+      {
+        "outbound": "DIRECT",
+        "rule_set": [
+          "geoip-cn"
+        ]
+      }
+    ]
+  }
+}

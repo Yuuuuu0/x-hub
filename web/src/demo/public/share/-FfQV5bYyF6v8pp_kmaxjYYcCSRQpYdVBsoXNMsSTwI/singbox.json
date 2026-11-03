@@ -1,0 +1,725 @@
+{
+  "dns": {
+    "final": "remote",
+    "rules": [
+      {
+        "rule_set": "geosite-cn",
+        "server": "local"
+      }
+    ],
+    "servers": [
+      {
+        "server": "1.1.1.1",
+        "tag": "remote",
+        "type": "https"
+      },
+      {
+        "server": "223.5.5.5",
+        "tag": "local",
+        "type": "udp"
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "auto_route": true,
+      "strict_route": true,
+      "tag": "tun-in",
+      "type": "tun"
+    },
+    {
+      "listen": "127.0.0.1",
+      "listen_port": 2080,
+      "tag": "mixed-in",
+      "type": "mixed"
+    }
+  ],
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "outbounds": [
+        "🇭🇰 香港节点",
+        "🇯🇵 日本节点",
+        "🇸🇬 新加坡节点",
+        "🇺🇸 美国节点",
+        "🇩🇪 德国节点",
+        "🏠 家宽",
+        "🌍 其他节点",
+        "DIRECT"
+      ],
+      "tag": "🌐 日常上网",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "🇺🇸 美国节点",
+        "🇯🇵 日本节点",
+        "🇩🇪 德国节点",
+        "🇸🇬 新加坡节点",
+        "🇭🇰 香港节点",
+        "DIRECT"
+      ],
+      "tag": "🎬 流媒体",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "🇭🇰 香港-hkt|📊1TB|⏳142D",
+        "🇭🇰 香港-cdn|📊1TB|⏳142D",
+        "[备用] 🇭🇰 香港 01",
+        "[备用] 🇭🇰 香港 02"
+      ],
+      "tag": "🇭🇰 香港节点",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "🇯🇵 日本-acck|📊2TB|⏳69D",
+        "[备用] 🇯🇵 日本 01"
+      ],
+      "tag": "🇯🇵 日本节点",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "[备用] 🇺🇸 美国 01"
+      ],
+      "tag": "🇺🇸 美国节点",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "🇸🇬 新加坡-sg|📊1TB|⏳23D",
+        "🇸🇬 新加坡-trojan|📊1TB|⏳23D"
+      ],
+      "tag": "🇸🇬 新加坡节点",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "DIRECT"
+      ],
+      "tag": "🇩🇪 德国节点",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "DIRECT"
+      ],
+      "tag": "🏠 家宽",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D",
+        "[备用] 🇹🇼 台湾 01"
+      ],
+      "tag": "🌍 其他节点",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "🌐 日常上网",
+        "🎬 流媒体",
+        "DIRECT"
+      ],
+      "tag": "🐟 漏网之鱼",
+      "type": "selector"
+    },
+    {
+      "outbounds": [
+        "DIRECT"
+      ],
+      "tag": "🖧 本地直连",
+      "type": "selector"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "203.0.113.11",
+      "server_port": 443,
+      "tag": "🇯🇵 日本-acck|📊2TB|⏳69D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "RzpsIEu9EPi4RxxIGASfpNUddRb1DxOqiQ4xsQs0PCA",
+          "short_id": "316ac17b64508e53"
+        },
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "e71b4cfb-17a1-42bc-bced-5a22b9c974ce"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "203.0.113.22",
+      "server_port": 443,
+      "tag": "🇭🇰 香港-hkt|📊1TB|⏳142D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "71VjXF9C-Gd7j3ZO--y4XtHd3JPfVvTogjnW9yZVr1g",
+          "short_id": "84dc856c9163c284"
+        },
+        "server_name": "www.cloudflare.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "e71b4cfb-17a1-42bc-bced-5a22b9c974ce"
+    },
+    {
+      "server": "203.0.113.22",
+      "server_port": 2083,
+      "tag": "🇭🇰 香港-cdn|📊1TB|⏳142D",
+      "tls": {
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled": true,
+        "server_name": "hk.example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "transport": {
+        "headers": {
+          "Host": "hk.example.com"
+        },
+        "path": "/ws",
+        "type": "ws"
+      },
+      "type": "vless",
+      "uuid": "e71b4cfb-17a1-42bc-bced-5a22b9c974ce"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "203.0.113.33",
+      "server_port": 443,
+      "tag": "🇸🇬 新加坡-sg|📊1TB|⏳23D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "AR3lLVsgXuLghEo3KMGPHoQCC_t35GlX88xqWnzyJng",
+          "short_id": "1619dd42f23dabdc"
+        },
+        "server_name": "www.amazon.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "e71b4cfb-17a1-42bc-bced-5a22b9c974ce"
+    },
+    {
+      "password": "0accc5d691b56ecf13f9cb527a03f849",
+      "server": "203.0.113.33",
+      "server_port": 8443,
+      "tag": "🇸🇬 新加坡-trojan|📊1TB|⏳23D",
+      "tls": {
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ],
+        "enabled": true,
+        "server_name": "sg.example.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "trojan"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "198.51.100.44",
+      "server_port": 443,
+      "tag": "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "EYLTse316KuZJGAcNkrSpl1EFS5dMb0wW36OsINkSgc",
+          "short_id": "9808f4a250800f0a"
+        },
+        "server_name": "www.nvidia.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      },
+      "type": "vless",
+      "uuid": "e71b4cfb-17a1-42bc-bced-5a22b9c974ce"
+    },
+    {
+      "password": "pw",
+      "server": "hk1.airport.example",
+      "server_port": 443,
+      "tag": "[备用] 🇭🇰 香港 01",
+      "tls": {
+        "enabled": true,
+        "server_name": "hk1.airport.example"
+      },
+      "type": "hysteria2"
+    },
+    {
+      "password": "pw",
+      "server": "hk2.airport.example",
+      "server_port": 443,
+      "tag": "[备用] 🇭🇰 香港 02",
+      "tls": {
+        "enabled": true,
+        "server_name": "hk2.airport.example"
+      },
+      "type": "hysteria2"
+    },
+    {
+      "password": "pw",
+      "server": "tw1.airport.example",
+      "server_port": 443,
+      "tag": "[备用] 🇹🇼 台湾 01",
+      "tls": {
+        "enabled": true,
+        "server_name": "tw1.airport.example"
+      },
+      "type": "trojan"
+    },
+    {
+      "password": "pw",
+      "server": "jp1.airport.example",
+      "server_port": 443,
+      "tag": "[备用] 🇯🇵 日本 01",
+      "tls": {
+        "enabled": true,
+        "server_name": "jp1.airport.example"
+      },
+      "type": "trojan"
+    },
+    {
+      "password": "pw",
+      "server": "us1.airport.example",
+      "server_port": 443,
+      "tag": "[备用] 🇺🇸 美国 01",
+      "tls": {
+        "enabled": true,
+        "server_name": "us1.airport.example"
+      },
+      "type": "trojan"
+    },
+    {
+      "tag": "DIRECT",
+      "type": "direct"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": "local",
+    "final": "🐟 漏网之鱼",
+    "rule_set": [
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "MyReject",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyReject.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "MyDirect",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyDirect.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "MyStreamCustom",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyStreamCustom.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "MyCustom",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyCustom.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "AdGuardSDNSFilter",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/AdGuardSDNSFilter.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "YouTube",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/YouTube.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "Netflix",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Netflix.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "Disney",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Disney.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "HBO",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/HBO.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "Spotify",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Spotify.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "telegramcidr",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/telegramcidr.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "OpenAI",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/OpenAI.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "Claude",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Claude.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "ClaudeTelemetry",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ClaudeTelemetry.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "Muse",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Muse.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "Gemini",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Gemini.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "MyHome",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyHome.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "Bing",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Bing.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "Google",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Google.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "GitHub",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/GitHub.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "proxy",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/proxy.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "gfw",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/gfw.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "ChinaMaxDomain",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ChinaMaxDomain.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "ChinaMaxIPNoIPv6",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ChinaMaxIPNoIPv6.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "source",
+        "tag": "lan",
+        "type": "remote",
+        "update_interval": "86400s",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/lan.json"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "binary",
+        "tag": "geoip-cn",
+        "type": "remote",
+        "update_interval": "1d",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/geo/geoip-cn.srs"
+      },
+      {
+        "download_detour": "DIRECT",
+        "format": "binary",
+        "tag": "geosite-cn",
+        "type": "remote",
+        "update_interval": "1d",
+        "url": "https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/geo/geosite-cn.srs"
+      }
+    ],
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "action": "hijack-dns",
+        "protocol": "dns"
+      },
+      {
+        "action": "reject",
+        "method": "default",
+        "rule_set": [
+          "MyReject"
+        ]
+      },
+      {
+        "outbound": "🖧 本地直连",
+        "rule_set": [
+          "MyDirect"
+        ]
+      },
+      {
+        "outbound": "🎬 流媒体",
+        "rule_set": [
+          "MyStreamCustom"
+        ]
+      },
+      {
+        "action": "resolve"
+      },
+      {
+        "outbound": "🌐 日常上网",
+        "rule_set": [
+          "MyCustom"
+        ]
+      },
+      {
+        "action": "reject",
+        "method": "default",
+        "rule_set": [
+          "AdGuardSDNSFilter"
+        ]
+      },
+      {
+        "outbound": "🎬 流媒体",
+        "rule_set": [
+          "YouTube"
+        ]
+      },
+      {
+        "outbound": "🎬 流媒体",
+        "rule_set": [
+          "Netflix"
+        ]
+      },
+      {
+        "outbound": "🎬 流媒体",
+        "rule_set": [
+          "Disney"
+        ]
+      },
+      {
+        "outbound": "🎬 流媒体",
+        "rule_set": [
+          "HBO"
+        ]
+      },
+      {
+        "outbound": "🎬 流媒体",
+        "rule_set": [
+          "Spotify"
+        ]
+      },
+      {
+        "outbound": "🎬 流媒体",
+        "rule_set": [
+          "telegramcidr"
+        ]
+      },
+      {
+        "outbound": "🏠 家宽",
+        "rule_set": [
+          "OpenAI"
+        ]
+      },
+      {
+        "outbound": "🏠 家宽",
+        "rule_set": [
+          "Claude"
+        ]
+      },
+      {
+        "outbound": "🏠 家宽",
+        "rule_set": [
+          "ClaudeTelemetry"
+        ]
+      },
+      {
+        "outbound": "🏠 家宽",
+        "rule_set": [
+          "Muse"
+        ]
+      },
+      {
+        "outbound": "🏠 家宽",
+        "rule_set": [
+          "Gemini"
+        ]
+      },
+      {
+        "outbound": "🏠 家宽",
+        "rule_set": [
+          "MyHome"
+        ]
+      },
+      {
+        "outbound": "🌐 日常上网",
+        "rule_set": [
+          "Bing"
+        ]
+      },
+      {
+        "outbound": "🌐 日常上网",
+        "rule_set": [
+          "Google"
+        ]
+      },
+      {
+        "outbound": "🌐 日常上网",
+        "rule_set": [
+          "GitHub"
+        ]
+      },
+      {
+        "outbound": "🌐 日常上网",
+        "rule_set": [
+          "proxy"
+        ]
+      },
+      {
+        "outbound": "🌐 日常上网",
+        "rule_set": [
+          "gfw"
+        ]
+      },
+      {
+        "outbound": "🖧 本地直连",
+        "rule_set": [
+          "ChinaMaxDomain"
+        ]
+      },
+      {
+        "outbound": "🖧 本地直连",
+        "rule_set": [
+          "ChinaMaxIPNoIPv6"
+        ]
+      },
+      {
+        "outbound": "🖧 本地直连",
+        "rule_set": [
+          "lan"
+        ]
+      },
+      {
+        "outbound": "🖧 本地直连",
+        "rule_set": [
+          "geoip-cn"
+        ]
+      }
+    ]
+  }
+}

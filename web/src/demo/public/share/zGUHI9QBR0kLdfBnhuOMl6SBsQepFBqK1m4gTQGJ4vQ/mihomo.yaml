@@ -1,0 +1,498 @@
+mode: rule
+mixed-port: 7897
+allow-lan: false
+log-level: info
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: strict
+global-client-fingerprint: chrome
+# 域名嗅探（可选）
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  override-destination: false
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+      override-destination: false
+    QUIC:
+      ports: [443, 8443]
+      override-destination: false
+  skip-domain: # 忽略嗅探
+    - 'Mijia Cloud'
+    - '+.push.apple.com'
+    - '+.wechat.com'
+    - '+.qpic.cn'
+    - '+.qq.com'
+    - '+.wechatapp.com'
+    #  语音通信
+    - '+.vivox.com'
+    # 向日葵服务
+    - '+.oray.com'
+    - '+.sunlogin.net'
+  skip-dst-address:
+    - '149.154.160.0/20'
+    - '185.76.151.0/24'
+    - '91.105.192.0/23'
+    - '91.108.16.0/21'
+    - '91.108.4.0/22'
+    - '91.108.56.0/22'
+    - '91.108.8.0/21'
+    - '95.161.64.0/20'
+    - '2001:67c:4e8::/48'
+    - '2001:b28:f23c::/47'
+    - '2001:b28:f23f::/48'
+    - '2a0a:f280::/29'
+    - '127.0.0.0/8' # 本机回环
+    - '10.0.0.0/8' # A类私有
+    - '172.16.0.0/12' # B类私有
+    - '192.168.0.0/16' # C类私有
+    - '169.254.0.0/16' # 链路本地
+    - '224.0.0.0/4' # 组播地址
+    - '240.0.0.0/4' # 保留地址
+    - 'fc00::/7' # IPv6 ULA
+    - 'fe80::/10' # IPv6 链路本地
+    - '::1/128' # IPv6 本机回环
+# DNS
+dns:
+  enable: true
+  ipv6: false
+  cache-algorithm: arc
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  use-hosts: true
+  use-system-hosts: false
+  respect-rules: true
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "+.localhost"
+  nameserver-policy:
+    "geosite:cn,private":
+      - https://223.5.5.5/dns-query
+      - https://doh.pub/dns-query
+  nameserver:
+    - https://1.1.1.1/dns-query
+    - https://8.8.8.8/dns-query
+  proxy-server-nameserver:
+    - https://223.5.5.5/dns-query
+    - https://doh.pub/dns-query
+tun:
+  enable: true
+  stack: system
+  dns-hijack:
+    - "any:53"
+    - "tcp://any:53"
+  auto-route: true
+  auto-redirect: true
+  auto-detect-interface: true
+  strict-route: true
+profile:
+  store-selected: true
+  store-fake-ip: true
+proxies:
+  - name: "🇯🇵 日本-acck|📊2TB|⏳69D"
+    type: vless
+    server: 203.0.113.11
+    port: 443
+    uuid: c5c7c779-ce88-4666-98e2-392d906c6d4f
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.microsoft.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: RzpsIEu9EPi4RxxIGASfpNUddRb1DxOqiQ4xsQs0PCA
+      short-id: 316ac17b64508e53
+  - name: "🇯🇵 日本-xhttp|📊2TB|⏳69D"
+    type: vless
+    server: 203.0.113.11
+    port: 8443
+    uuid: c5c7c779-ce88-4666-98e2-392d906c6d4f
+    network: xhttp
+    udp: true
+    tls: true
+    servername: www.apple.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: txsL21Ub16Rs9c4hqm6jIS2b5wdF38GqPeNZS3-272A
+      short-id: 45d26d451e9be3e2
+    xhttp-opts:
+      path: /xh
+      host: www.apple.com
+      mode: auto
+  - name: "🇭🇰 香港-hkt|📊1TB|⏳142D"
+    type: vless
+    server: 203.0.113.22
+    port: 443
+    uuid: c5c7c779-ce88-4666-98e2-392d906c6d4f
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.cloudflare.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: 71VjXF9C-Gd7j3ZO--y4XtHd3JPfVvTogjnW9yZVr1g
+      short-id: 84dc856c9163c284
+  - name: "🇭🇰 香港-cdn|📊1TB|⏳142D"
+    type: vless
+    server: 203.0.113.22
+    port: 2083
+    uuid: c5c7c779-ce88-4666-98e2-392d906c6d4f
+    network: ws
+    udp: true
+    tls: true
+    servername: hk.example.com
+    alpn:
+      - h2
+      - http/1.1
+    client-fingerprint: chrome
+    ws-opts:
+      path: /ws
+      headers:
+        Host: hk.example.com
+  - name: "🇸🇬 新加坡-sg|📊1TB|⏳23D"
+    type: vless
+    server: 203.0.113.33
+    port: 443
+    uuid: c5c7c779-ce88-4666-98e2-392d906c6d4f
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.amazon.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AR3lLVsgXuLghEo3KMGPHoQCC_t35GlX88xqWnzyJng
+      short-id: 1619dd42f23dabdc
+  - name: "🇸🇬 新加坡-trojan|📊1TB|⏳23D"
+    type: trojan
+    server: 203.0.113.33
+    port: 8443
+    password: ee760d9656dd78ccbae10bb179273cde
+    network: tcp
+    udp: true
+    sni: sg.example.com
+    alpn:
+      - h2
+      - http/1.1
+    client-fingerprint: chrome
+  - name: "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D"
+    type: vless
+    server: 198.51.100.44
+    port: 443
+    uuid: c5c7c779-ce88-4666-98e2-392d906c6d4f
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.nvidia.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: EYLTse316KuZJGAcNkrSpl1EFS5dMb0wW36OsINkSgc
+      short-id: 9808f4a250800f0a
+  - name: "🇩🇪 德国-relay"
+    type: ss
+    server: 198.51.100.55
+    port: 23456
+    password: 76M0e/X1IN2dVzNRj7voRg==:BoURqhH4P+mhT2oIovhQ1g==
+    cipher: 2022-blake3-aes-128-gcm
+    udp: true
+  - name: "🇺🇸 美国家宽"
+    type: socks5
+    server: 192.0.2.10
+    port: 1080
+    dialer-proxy: "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D"
+    password: pass
+    udp: true
+    username: user
+  - name: "[备用] 🇭🇰 香港 01"
+    type: hysteria2
+    server: hk1.airport.example
+    port: 443
+    password: pw
+    sni: hk1.airport.example
+  - name: "[备用] 🇭🇰 香港 02"
+    type: hysteria2
+    server: hk2.airport.example
+    port: 443
+    password: pw
+    sni: hk2.airport.example
+  - name: "[备用] 🇹🇼 台湾 01"
+    type: trojan
+    server: tw1.airport.example
+    port: 443
+    password: pw
+    sni: tw1.airport.example
+    udp: true
+  - name: "[备用] 🇯🇵 日本 01"
+    type: trojan
+    server: jp1.airport.example
+    port: 443
+    password: pw
+    sni: jp1.airport.example
+    udp: true
+  - name: "[备用] 🇺🇸 美国 01"
+    type: trojan
+    server: us1.airport.example
+    port: 443
+    password: pw
+    sni: us1.airport.example
+    udp: true
+proxy-groups:
+  - name: "🌐 日常上网"
+    type: select
+    proxies:
+      - "🇭🇰 香港节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇺🇸 美国节点"
+      - "🇩🇪 德国节点"
+      - "🏠 家宽"
+      - "🌍 其他节点"
+      - DIRECT
+  - name: "🎬 流媒体"
+    type: select
+    proxies:
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇩🇪 德国节点"
+      - "🇸🇬 新加坡节点"
+      - "🇭🇰 香港节点"
+      - DIRECT
+  - name: "🇭🇰 香港节点"
+    type: select
+    proxies:
+      - "🇭🇰 香港-hkt|📊1TB|⏳142D"
+      - "🇭🇰 香港-cdn|📊1TB|⏳142D"
+      - "[备用] 🇭🇰 香港 01"
+      - "[备用] 🇭🇰 香港 02"
+  - name: "🇯🇵 日本节点"
+    type: select
+    proxies:
+      - "🇯🇵 日本-acck|📊2TB|⏳69D"
+      - "🇯🇵 日本-xhttp|📊2TB|⏳69D"
+      - "[备用] 🇯🇵 日本 01"
+  - name: "🇺🇸 美国节点"
+    type: select
+    proxies:
+      - "[备用] 🇺🇸 美国 01"
+  - name: "🇸🇬 新加坡节点"
+    type: select
+    proxies:
+      - "🇸🇬 新加坡-sg|📊1TB|⏳23D"
+      - "🇸🇬 新加坡-trojan|📊1TB|⏳23D"
+  - name: "🇩🇪 德国节点"
+    type: select
+    proxies:
+      - "🇩🇪 德国-relay"
+  - name: "🏠 家宽"
+    type: select
+    proxies:
+      - "🇺🇸 美国家宽"
+  - name: "🌍 其他节点"
+    type: select
+    proxies:
+      - "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D"
+      - "[备用] 🇹🇼 台湾 01"
+  - name: "🐟 漏网之鱼"
+    type: select
+    proxies:
+      - "🌐 日常上网"
+      - "🎬 流媒体"
+      - DIRECT
+  - name: "🖧 本地直连"
+    type: select
+    proxies:
+      - DIRECT
+  - name: "🛡️ AdGuard"
+    type: select
+    proxies:
+      - REJECT
+rule-providers:
+  MyReject:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyReject.yaml
+    path: ./ruleset/MyReject.yaml
+    interval: 86400
+  MyDirect:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyDirect.yaml
+    path: ./ruleset/MyDirect.yaml
+    interval: 86400
+  MyStreamCustom:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyStreamCustom.yaml
+    path: ./ruleset/MyStreamCustom.yaml
+    interval: 86400
+  MyCustom:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyCustom.yaml
+    path: ./ruleset/MyCustom.yaml
+    interval: 86400
+  AdGuardSDNSFilter:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/AdGuardSDNSFilter.yaml
+    path: ./ruleset/AdGuardSDNSFilter.yaml
+    interval: 86400
+  YouTube:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/YouTube.yaml
+    path: ./ruleset/YouTube.yaml
+    interval: 86400
+  Netflix:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Netflix.yaml
+    path: ./ruleset/Netflix.yaml
+    interval: 86400
+  Disney:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Disney.yaml
+    path: ./ruleset/Disney.yaml
+    interval: 86400
+  HBO:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/HBO.yaml
+    path: ./ruleset/HBO.yaml
+    interval: 86400
+  Spotify:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Spotify.yaml
+    path: ./ruleset/Spotify.yaml
+    interval: 86400
+  telegramcidr:
+    type: http
+    behavior: ipcidr
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/telegramcidr.yaml
+    path: ./ruleset/telegramcidr.yaml
+    interval: 86400
+  OpenAI:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/OpenAI.yaml
+    path: ./ruleset/OpenAI.yaml
+    interval: 86400
+  Claude:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Claude.yaml
+    path: ./ruleset/Claude.yaml
+    interval: 86400
+  ClaudeTelemetry:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ClaudeTelemetry.yaml
+    path: ./ruleset/ClaudeTelemetry.yaml
+    interval: 86400
+  Muse:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Muse.yaml
+    path: ./ruleset/Muse.yaml
+    interval: 86400
+  Gemini:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Gemini.yaml
+    path: ./ruleset/Gemini.yaml
+    interval: 86400
+  MyHome:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/MyHome.yaml
+    path: ./ruleset/MyHome.yaml
+    interval: 86400
+  Bing:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Bing.yaml
+    path: ./ruleset/Bing.yaml
+    interval: 86400
+  Google:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/Google.yaml
+    path: ./ruleset/Google.yaml
+    interval: 86400
+  GitHub:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/GitHub.yaml
+    path: ./ruleset/GitHub.yaml
+    interval: 86400
+  proxy:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/proxy.yaml
+    path: ./ruleset/proxy.yaml
+    interval: 86400
+  gfw:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/gfw.yaml
+    path: ./ruleset/gfw.yaml
+    interval: 86400
+  ChinaMaxDomain:
+    type: http
+    behavior: domain
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ChinaMaxDomain.yaml
+    path: ./ruleset/ChinaMaxDomain.yaml
+    interval: 86400
+  ChinaMaxIPNoIPv6:
+    type: http
+    behavior: ipcidr
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/ChinaMaxIPNoIPv6.yaml
+    path: ./ruleset/ChinaMaxIPNoIPv6.yaml
+    interval: 86400
+  lan:
+    type: http
+    behavior: classical
+    url: https://hub.example.com/DgvdPEjd/rules/zVdQpGTefHEetiQW22nqBsYM/lan.yaml
+    path: ./ruleset/lan.yaml
+    interval: 86400
+rules:
+  - "RULE-SET,MyReject,🛡️ AdGuard"
+  - "RULE-SET,MyDirect,🖧 本地直连"
+  - "RULE-SET,MyStreamCustom,🎬 流媒体"
+  - "RULE-SET,MyCustom,🌐 日常上网"
+  - "RULE-SET,AdGuardSDNSFilter,🛡️ AdGuard"
+  - "RULE-SET,YouTube,🎬 流媒体,no-resolve"
+  - "RULE-SET,Netflix,🎬 流媒体"
+  - "RULE-SET,Disney,🎬 流媒体"
+  - "RULE-SET,HBO,🎬 流媒体"
+  - "RULE-SET,Spotify,🎬 流媒体,no-resolve"
+  - "RULE-SET,telegramcidr,🎬 流媒体,no-resolve"
+  - "RULE-SET,OpenAI,🏠 家宽,no-resolve"
+  - "RULE-SET,Claude,🏠 家宽,no-resolve"
+  - "RULE-SET,ClaudeTelemetry,🏠 家宽,no-resolve"
+  - "RULE-SET,Muse,🏠 家宽,no-resolve"
+  - "RULE-SET,Gemini,🏠 家宽,no-resolve"
+  - "RULE-SET,MyHome,🏠 家宽"
+  - "RULE-SET,Bing,🌐 日常上网"
+  - "RULE-SET,Google,🌐 日常上网"
+  - "RULE-SET,GitHub,🌐 日常上网"
+  - "RULE-SET,proxy,🌐 日常上网"
+  - "RULE-SET,gfw,🌐 日常上网"
+  - "RULE-SET,ChinaMaxDomain,🖧 本地直连"
+  - "RULE-SET,ChinaMaxIPNoIPv6,🖧 本地直连,no-resolve"
+  - "RULE-SET,lan,🖧 本地直连,no-resolve"
+  - "GEOIP,CN,🖧 本地直连"
+  - "MATCH,🐟 漏网之鱼"

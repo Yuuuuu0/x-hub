@@ -1,0 +1,54 @@
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+proxies:
+  - name: "🇯🇵 日本-acck|📊2TB|⏳69D"
+    type: vless
+    server: 203.0.113.11
+    port: 443
+    uuid: a75981bc-da0d-4940-9849-f8be15471c20
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.microsoft.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: RzpsIEu9EPi4RxxIGASfpNUddRb1DxOqiQ4xsQs0PCA
+      short-id: 316ac17b64508e53
+  - name: "🇸🇬 新加坡-sg|📊1TB|⏳23D"
+    type: vless
+    server: 203.0.113.33
+    port: 443
+    uuid: a75981bc-da0d-4940-9849-f8be15471c20
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.amazon.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AR3lLVsgXuLghEo3KMGPHoQCC_t35GlX88xqWnzyJng
+      short-id: 1619dd42f23dabdc
+proxy-groups:
+  - name: 节点选择
+    type: select
+    proxies:
+      - 自动选择
+      - DIRECT
+      - "🇯🇵 日本-acck|📊2TB|⏳69D"
+      - "🇸🇬 新加坡-sg|📊1TB|⏳23D"
+  - name: 自动选择
+    type: url-test
+    proxies:
+      - "🇯🇵 日本-acck|📊2TB|⏳69D"
+      - "🇸🇬 新加坡-sg|📊1TB|⏳23D"
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+rules:
+  - GEOIP,LAN,DIRECT,no-resolve
+  - GEOSITE,CN,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,节点选择

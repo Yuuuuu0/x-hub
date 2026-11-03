@@ -1,0 +1,147 @@
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+proxies:
+  - name: "🇯🇵 日本-acck|📊2TB|⏳69D"
+    type: vless
+    server: 203.0.113.11
+    port: 443
+    uuid: 86335917-1795-4400-8c12-b7650419acd8
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.microsoft.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: RzpsIEu9EPi4RxxIGASfpNUddRb1DxOqiQ4xsQs0PCA
+      short-id: 316ac17b64508e53
+  - name: "🇯🇵 日本-xhttp|📊2TB|⏳69D"
+    type: vless
+    server: 203.0.113.11
+    port: 8443
+    uuid: 86335917-1795-4400-8c12-b7650419acd8
+    network: xhttp
+    udp: true
+    tls: true
+    servername: www.apple.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: txsL21Ub16Rs9c4hqm6jIS2b5wdF38GqPeNZS3-272A
+      short-id: 45d26d451e9be3e2
+    xhttp-opts:
+      path: /xh
+      host: www.apple.com
+      mode: auto
+  - name: "🇭🇰 香港-hkt|📊1TB|⏳142D"
+    type: vless
+    server: 203.0.113.22
+    port: 443
+    uuid: 86335917-1795-4400-8c12-b7650419acd8
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.cloudflare.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: 71VjXF9C-Gd7j3ZO--y4XtHd3JPfVvTogjnW9yZVr1g
+      short-id: 84dc856c9163c284
+  - name: "🇭🇰 香港-cdn|📊1TB|⏳142D"
+    type: vless
+    server: 203.0.113.22
+    port: 2083
+    uuid: 86335917-1795-4400-8c12-b7650419acd8
+    network: ws
+    udp: true
+    tls: true
+    servername: hk.example.com
+    alpn:
+      - h2
+      - http/1.1
+    client-fingerprint: chrome
+    ws-opts:
+      path: /ws
+      headers:
+        Host: hk.example.com
+  - name: "🇸🇬 新加坡-sg|📊1TB|⏳23D"
+    type: vless
+    server: 203.0.113.33
+    port: 443
+    uuid: 86335917-1795-4400-8c12-b7650419acd8
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.amazon.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: AR3lLVsgXuLghEo3KMGPHoQCC_t35GlX88xqWnzyJng
+      short-id: 1619dd42f23dabdc
+  - name: "🇸🇬 新加坡-trojan|📊1TB|⏳23D"
+    type: trojan
+    server: 203.0.113.33
+    port: 8443
+    password: b79d01d1fc5ebc2c9feff4675b7578c7
+    network: tcp
+    udp: true
+    sni: sg.example.com
+    alpn:
+      - h2
+      - http/1.1
+    client-fingerprint: chrome
+  - name: "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D"
+    type: vless
+    server: 198.51.100.44
+    port: 443
+    uuid: 86335917-1795-4400-8c12-b7650419acd8
+    network: tcp
+    udp: true
+    tls: true
+    flow: xtls-rprx-vision
+    servername: www.nvidia.com
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: EYLTse316KuZJGAcNkrSpl1EFS5dMb0wW36OsINkSgc
+      short-id: 9808f4a250800f0a
+  - name: "🇩🇪 德国-relay"
+    type: ss
+    server: 198.51.100.55
+    port: 23456
+    password: 76M0e/X1IN2dVzNRj7voRg==:FPcjmVawxjmtXzDtKkxLSA==
+    cipher: 2022-blake3-aes-128-gcm
+    udp: true
+proxy-groups:
+  - name: 节点选择
+    type: select
+    proxies:
+      - 自动选择
+      - DIRECT
+      - "🇯🇵 日本-acck|📊2TB|⏳69D"
+      - "🇯🇵 日本-xhttp|📊2TB|⏳69D"
+      - "🇭🇰 香港-hkt|📊1TB|⏳142D"
+      - "🇭🇰 香港-cdn|📊1TB|⏳142D"
+      - "🇸🇬 新加坡-sg|📊1TB|⏳23D"
+      - "🇸🇬 新加坡-trojan|📊1TB|⏳23D"
+      - "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D"
+      - "🇩🇪 德国-relay"
+  - name: 自动选择
+    type: url-test
+    proxies:
+      - "🇯🇵 日本-acck|📊2TB|⏳69D"
+      - "🇯🇵 日本-xhttp|📊2TB|⏳69D"
+      - "🇭🇰 香港-hkt|📊1TB|⏳142D"
+      - "🇭🇰 香港-cdn|📊1TB|⏳142D"
+      - "🇸🇬 新加坡-sg|📊1TB|⏳23D"
+      - "🇸🇬 新加坡-trojan|📊1TB|⏳23D"
+      - "🇺🇸 洛杉矶-cn2|📊3TB|⏳301D"
+      - "🇩🇪 德国-relay"
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+rules:
+  - GEOIP,LAN,DIRECT,no-resolve
+  - GEOSITE,CN,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,节点选择
