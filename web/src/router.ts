@@ -1,8 +1,9 @@
-import { createRouter, createWebHistory } from 'vue-router'
-import { BASE, loadSession, session, setUnauthorizedHandler } from './lib/api'
+import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router'
+import { BASE, DEMO, loadSession, session, setUnauthorizedHandler } from './lib/api'
 
 export const router = createRouter({
-  history: createWebHistory(BASE),
+  // 演示环境部署在 GitHub Pages，没有 SPA 回退，改用 hash 路由
+  history: DEMO ? createWebHashHistory() : createWebHistory(BASE),
   routes: [
     { path: '/login', name: 'login', component: () => import('./views/LoginView.vue'), meta: { public: true } },
     {

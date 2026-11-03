@@ -17,7 +17,11 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn
 }
 
+/** 演示模式构建（VITE_DEMO=1）：不连接主控，接口由预置数据模拟，用于 GitHub Pages 演示环境。 */
+export const DEMO = !!import.meta.env.VITE_DEMO
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (import.meta.env.VITE_DEMO) return (await import('../demo/mock')).demoRequest<T>(method, path, body)
   const res = await fetch(`${BASE}api/${path}`, {
     method,
     credentials: 'same-origin',

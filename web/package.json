@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build && node -e \"require('fs').writeFileSync('dist/.gitkeep','')\"",
+    "build:demo": "vue-tsc --noEmit && VITE_DEMO=1 vite build",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {

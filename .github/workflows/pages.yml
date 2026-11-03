@@ -1,0 +1,49 @@
+name: Demo
+
+# 构建演示模式前端（接口由预置数据模拟，不连接主控）并发布到 GitHub Pages。
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build demo
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:demo
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web/dist-demo
+
+      - id: deployment
+        uses: actions/deploy-pages@v5

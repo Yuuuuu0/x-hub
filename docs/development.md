@@ -17,6 +17,18 @@ make test           # go vet + go test + 前端类型检查
 make docker         # 构建本地镜像
 ```
 
+## 演示环境
+
+演示环境是一份不连接主控的前端构建：`VITE_DEMO=1` 时 `web/src/lib/api.ts` 把所有接口请求交给 `web/src/demo/mock.ts`，读取类接口返回 `web/src/demo/fixtures.json` 中的预置数据，修改类接口提示「演示环境为只读」。路由改用 hash 模式，以适应 GitHub Pages 没有 SPA 回退的限制。正式构建不包含这部分代码。
+
+```bash
+cd web && pnpm build:demo   # 输出到 web/dist-demo，可用任意静态服务器预览
+```
+
+推送到 `main` 且改动了 `web/` 时，`Demo` 工作流会构建并发布到 GitHub Pages。
+
+预置数据由真实主控生成，接口有变化时重新生成即可（步骤见 `web/src/demo/fixtures.py` 开头的说明）。README 中的截图也取自演示环境，分享页截图取自写入同样数据的本地主控。
+
 ## 目录结构
 
 ```
@@ -39,6 +51,7 @@ GitHub Actions：
 | 推送 / PR | CI：gofmt、`go vet`、`go test -race`、前端类型检查与构建 |
 | 推送到 `main` | 镜像 `ghcr.io/yuuuuu0/xhub-master:latest` 与 `:sha-<短哈希>`，版本号为 7 位短哈希 |
 | 推送 `v*` 标签 | 镜像 `:<版本>`、`:<主.次>`；GitHub Release 附带主控、被控端程序与 SHA256SUMS |
+| 推送到 `main`（改动 `web/`） | 演示环境发布到 GitHub Pages |
 
 ```bash
 git tag v0.1.0

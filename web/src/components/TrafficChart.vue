@@ -69,6 +69,12 @@ const bars = computed(() =>
 )
 
 const labelEvery = computed(() => Math.ceil(props.data.length / Math.max(2, Math.floor(plotW.value / 56))))
+
+/** 是否显示第 i 根柱子的日期：每隔 labelEvery 显示一个，并总显示最后一天；离最后一天太近的常规标签省略，避免重叠。 */
+function showLabel(i: number) {
+  const last = bars.value.length - 1
+  return i === last || (i % labelEvery.value === 0 && last - i >= labelEvery.value / 2)
+}
 const tip = computed(() => {
   if (hover.value === null) return null
   const b = bars.value[hover.value]
@@ -112,7 +118,7 @@ const total = computed(() => props.data.reduce((s, d) => ({ up: s.up + d.up, dow
         </g>
         <g class="xaxis">
           <template v-for="b in bars" :key="b.d.day">
-            <text v-if="b.i % labelEvery === 0 || b.i === bars.length - 1" :x="b.x + barW / 2" :y="HEIGHT - 8" text-anchor="middle" class="mono">
+            <text v-if="showLabel(b.i)" :x="b.x + barW / 2" :y="HEIGHT - 8" text-anchor="middle" class="mono">
               {{ b.d.day.slice(5) }}
             </text>
           </template>

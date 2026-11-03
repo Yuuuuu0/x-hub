@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { Globe, LogOut, Monitor, Moon, Network, Server, Settings, Split, Sun, Users } from 'lucide-vue-next'
-import { api, session } from '../lib/api'
+import { DEMO, api, session } from '../lib/api'
 import { cycleTheme, themeMode } from '../lib/theme'
 import PublicUrlModal from '../components/PublicUrlModal.vue'
 
@@ -19,6 +20,10 @@ const nav = [
 const themeIcon = computed(() => ({ system: Monitor, light: Sun, dark: Moon })[themeMode.value])
 const themeLabel = computed(() => ({ system: '跟随系统', light: '浅色', dark: '深色' })[themeMode.value])
 const showPublicUrl = ref(!session.publicUrlSet)
+
+onMounted(() => {
+  if (DEMO) message.info('这是演示环境：数据均为虚构，修改不会保存', 6)
+})
 
 async function logout() {
   await api.post('logout').catch(() => {})
