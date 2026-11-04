@@ -37,7 +37,9 @@ func (h *Handler) subscriptionNodes(s *store.Subscription) ([]outNode, []string,
 	for _, n := range own {
 		out = append(out, outNode{Node: routing.Node{Name: n.Name, Own: true, Mihomo: n.Mihomo, SingBox: n.SingBox}, Link: n.Link})
 		taken[n.Name] = true
-		byInbound[n.InboundID] = n.Name
+		if _, ok := byInbound[n.InboundID]; !ok {
+			byInbound[n.InboundID] = n.Name // 多个地址时以第一个（主地址）作为前置节点
+		}
 	}
 	sources, err := h.Store.ListExternalSources()
 	if err != nil {

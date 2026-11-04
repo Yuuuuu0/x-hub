@@ -61,7 +61,7 @@ func TestEnrollAndConnect(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	id, _ := h.Store.CreateNode("n1", "", "")
+	id, _ := h.Store.CreateNode("n1", "", nil)
 	token := auth.RandomToken()
 	if _, err := h.Store.CreateEnrollToken(id, auth.HashToken(token), time.Hour); err != nil {
 		t.Fatal(err)

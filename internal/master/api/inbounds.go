@@ -47,22 +47,20 @@ func (h *Handler) listInbounds(w http.ResponseWriter, r *http.Request) {
 }
 
 type inboundInput struct {
-	NodeID   int64           `json:"nodeId"`
-	Remark   string          `json:"remark"`
-	Enabled  bool            `json:"enabled"`
-	Listen   string          `json:"listen"`
-	Port     int             `json:"port"`
-	Protocol string          `json:"protocol"`
-	Spec     json.RawMessage `json:"spec"`
-	LinkHost string          `json:"linkHost"`
-	LinkPort int             `json:"linkPort"`
+	NodeID    int64            `json:"nodeId"`
+	Remark    string           `json:"remark"`
+	Enabled   bool             `json:"enabled"`
+	Listen    string           `json:"listen"`
+	Port      int              `json:"port"`
+	Protocol  string           `json:"protocol"`
+	Spec      json.RawMessage  `json:"spec"`
+	LinkAddrs []store.LinkAddr `json:"linkAddrs"`
 }
 
 // toInbound 校验输入并转换为存储结构，Spec 以规范化后的形式保存（含派生公钥）。
 func (in *inboundInput) toInbound() (*store.Inbound, error) {
 	in.Remark = strings.TrimSpace(in.Remark)
 	in.Listen = strings.TrimSpace(in.Listen)
-	in.LinkHost = strings.TrimSpace(in.LinkHost)
 	if utf8.RuneCountInString(in.Remark) > 64 {
 		return nil, errors.New("备注不能超过 64 字")
 	}
@@ -72,11 +70,25 @@ func (in *inboundInput) toInbound() (*store.Inbound, error) {
 	if in.Port < 1 || in.Port > 65535 {
 		return nil, errors.New("端口需在 1 到 65535 之间")
 	}
-	if in.LinkPort < 0 || in.LinkPort > 65535 {
-		return nil, errors.New("链接端口需在 0 到 65535 之间")
+	if len(in.LinkAddrs) > maxAddrs {
+		return nil, fmt.Errorf("连接地址最多 %d 个", maxAddrs)
 	}
-	if strings.ContainsAny(in.LinkHost, "/@ []") || strings.Count(in.LinkHost, ":") == 1 {
-		return nil, errors.New("链接地址只填域名或 IP")
+	for i := range in.LinkAddrs {
+		a := &in.LinkAddrs[i]
+		a.Host = strings.TrimSpace(a.Host)
+		a.Label = strings.TrimSpace(a.Label)
+		if a.Host == "" && a.Port == 0 {
+			return nil, fmt.Errorf("第 %d 个连接地址需填写地址或端口", i+1)
+		}
+		if a.Port < 0 || a.Port > 65535 {
+			return nil, fmt.Errorf("第 %d 个连接地址的端口需在 0 到 65535 之间", i+1)
+		}
+		if err := checkHost(a.Host); err != nil {
+			return nil, fmt.Errorf("第 %d 个连接地址%s", i+1, err)
+		}
+		if err := checkLabel(a.Label); err != nil {
+			return nil, fmt.Errorf("第 %d 个连接地址%s", i+1, err)
+		}
 	}
 	spec, err := model.ParseSpec(in.Protocol, in.Spec)
 	if err != nil {
@@ -85,7 +97,7 @@ func (in *inboundInput) toInbound() (*store.Inbound, error) {
 	raw, _ := json.Marshal(spec)
 	return &store.Inbound{
 		NodeID: in.NodeID, Remark: in.Remark, Enabled: in.Enabled, Listen: in.Listen, Port: in.Port,
-		Protocol: in.Protocol, Spec: raw, LinkHost: in.LinkHost, LinkPort: in.LinkPort,
+		Protocol: in.Protocol, Spec: raw, LinkAddrs: in.LinkAddrs,
 	}, nil
 }
 
@@ -113,6 +125,22 @@ func (h *Handler) checkCerts(ctx context.Context, in *store.Inbound) error {
 	}
 	if !res.OK {
 		return fmt.Errorf("证书文件不可用：%s", res.Error)
+	}
+	return nil
+}
+
+// checkListenFamily 在入站监听某个具体 IP 时，确认对外地址中没有另一协议族的 IP：
+// 监听 IPv4 地址的入站无法通过 IPv6 地址连接，反之亦然。监听留空或 0.0.0.0、:: 时为双栈，不受限制。
+func checkListenFamily(n *store.Node, in *store.Inbound) error {
+	listen := net.ParseIP(in.Listen)
+	if listen == nil || listen.IsUnspecified() {
+		return nil
+	}
+	v4 := listen.To4() != nil
+	for _, t := range sub.Targets(n, in, "", sub.NameVars{}) {
+		if ip := net.ParseIP(t.Host); ip != nil && (ip.To4() != nil) != v4 {
+			return fmt.Errorf("入站只监听 %s，无法通过 %s 连接；请将监听 IP 留空以同时监听 IPv4 与 IPv6", in.Listen, t.Host)
+		}
 	}
 	return nil
 }
@@ -145,8 +173,13 @@ func (h *Handler) createInbound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := h.Store.GetNode(in.NodeID); err != nil {
+	node, err := h.Store.GetNode(in.NodeID)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "所属服务器不存在")
+		return
+	}
+	if err := checkListenFamily(node, in); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.checkPort(r.Context(), in.NodeID, in.Port); err != nil {
@@ -189,6 +222,12 @@ func (h *Handler) updateInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.ID = id
+	if node, err := h.Store.GetNode(in.NodeID); err == nil {
+		if err := checkListenFamily(node, in); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if in.Port != old.Port {
 		if err := h.checkPort(r.Context(), in.NodeID, in.Port); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -247,9 +286,9 @@ func (h *Handler) inboundLinks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	target := sub.Target(node, in, h.Settings.Subscription().NameTemplate, h.nameVars()(node))
-	if target.Host == "" {
-		writeError(w, http.StatusBadRequest, "服务器未设置公网地址，请先编辑服务器或在入站中填写链接地址")
+	targets := sub.Targets(node, in, h.Settings.Subscription().NameTemplate, h.nameVars()(node))
+	if len(targets) == 0 {
+		writeError(w, http.StatusBadRequest, "服务器未设置公网地址，请先编辑服务器或在入站中填写连接地址")
 		return
 	}
 	subs, err := h.Store.InboundSubscriptions(in.ID)
@@ -260,12 +299,17 @@ func (h *Handler) inboundLinks(w http.ResponseWriter, r *http.Request) {
 	type link struct {
 		SubscriptionID   int64  `json:"subscriptionId"`
 		SubscriptionName string `json:"subscriptionName"`
+		Addr             string `json:"addr"` // 连接地址与端口，区分同一入站的多个地址
+		Name             string `json:"name"`
 		Link             string `json:"link"`
 	}
-	out := make([]link, 0, len(subs))
+	out := make([]link, 0, len(subs)*len(targets))
 	for _, sb := range subs {
 		cred := model.CredentialFor(in.Protocol, spec, sb.UUID, sb.Secret, in.ID)
-		out = append(out, link{sb.ID, sb.Name, model.ShareLink(in.Protocol, spec, target, cred)})
+		for _, t := range targets {
+			addr := net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
+			out = append(out, link{sb.ID, sb.Name, addr, t.Name, model.ShareLink(in.Protocol, spec, t, cred)})
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"links": out, "enabled": in.Enabled})
 }

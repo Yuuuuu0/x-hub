@@ -29,7 +29,7 @@ func addExternal(t *testing.T, h *Handler, name, content, chain string, subIDs .
 // TestExternalNodesInSubscription 覆盖外部节点的可见范围、重名、前置入站与前置分组，以及 Base64 中排除带前置的节点。
 func TestExternalNodesInSubscription(t *testing.T) {
 	h := newTestHandler(t)
-	n1, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	n1, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "jp.example.com"}})
 	in1 := addInbound(t, h, n1, 443, "")
 	subA, _ := CreateSubscription(h.Store, "A", "")
 	subB, _ := CreateSubscription(h.Store, "B", "")

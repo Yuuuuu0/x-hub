@@ -126,7 +126,6 @@ var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
 func validateNode(in *nodeInput) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Remark = strings.TrimSpace(in.Remark)
-	in.PublicHost = strings.TrimSpace(in.PublicHost)
 	in.Country = strings.ToUpper(strings.TrimSpace(in.Country))
 	in.Region = strings.TrimSpace(in.Region)
 	if n := utf8.RuneCountInString(in.Name); n < 1 || n > 32 {
@@ -157,9 +156,46 @@ func validateNode(in *nodeInput) error {
 	default:
 		return errors.New("流量计费方式无效")
 	}
-	// 恰好一个冒号意味着带了端口；IPv6 地址含多个冒号，允许。
-	if strings.ContainsAny(in.PublicHost, "/@ []") || strings.Count(in.PublicHost, ":") == 1 {
-		return errors.New("公网地址只填域名或 IP，不含协议与端口")
+	if len(in.PublicHosts) > maxAddrs {
+		return fmt.Errorf("公网地址最多 %d 个", maxAddrs)
+	}
+	seen := map[string]bool{}
+	for i := range in.PublicHosts {
+		a := &in.PublicHosts[i]
+		a.Host = strings.TrimSpace(a.Host)
+		a.Label = strings.TrimSpace(a.Label)
+		if a.Host == "" {
+			return fmt.Errorf("第 %d 个公网地址不能为空", i+1)
+		}
+		if err := checkHost(a.Host); err != nil {
+			return fmt.Errorf("第 %d 个公网地址%s", i+1, err)
+		}
+		if err := checkLabel(a.Label); err != nil {
+			return fmt.Errorf("第 %d 个公网地址%s", i+1, err)
+		}
+		if seen[a.Host] {
+			return fmt.Errorf("公网地址 %s 重复", a.Host)
+		}
+		seen[a.Host] = true
+	}
+	return nil
+}
+
+// maxAddrs 为服务器公网地址与入站连接地址的数量上限。
+const maxAddrs = 8
+
+// checkHost 校验对外地址：只能是域名或 IP，不含协议与端口。恰好一个冒号意味着带了端口；IPv6 地址含多个冒号，允许。
+func checkHost(host string) error {
+	if strings.ContainsAny(host, "/@ []") || strings.Count(host, ":") == 1 {
+		return errors.New("只填域名或 IP，不含协议与端口")
+	}
+	return nil
+}
+
+// checkLabel 校验地址标签：用于节点名称，限制长度并排除名称模板与分组中的分隔符。
+func checkLabel(label string) error {
+	if utf8.RuneCountInString(label) > 16 || strings.ContainsAny(label, ",=|") {
+		return errors.New("的标签不超过 16 个字，且不能包含逗号、等号或竖线")
 	}
 	return nil
 }
@@ -174,7 +210,7 @@ func (h *Handler) createNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	id, err := h.Store.CreateNode(in.Name, in.Remark, in.PublicHost)
+	id, err := h.Store.CreateNode(in.Name, in.Remark, in.PublicHosts)
 	if err == nil {
 		err = h.Store.UpdateNode(id, &in)
 	}

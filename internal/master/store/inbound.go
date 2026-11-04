@@ -22,22 +22,33 @@ type Inbound struct {
 	Port      int             `json:"port"`
 	Protocol  string          `json:"protocol"`
 	Spec      json.RawMessage `json:"spec"`
-	LinkHost  string          `json:"linkHost"`
-	LinkPort  int             `json:"linkPort"`
+	LinkAddrs []LinkAddr      `json:"linkAddrs"`
 	CreatedAt int64           `json:"createdAt"`
 	UpdatedAt int64           `json:"updatedAt"`
 }
 
-const inboundColumns = `id, node_id, remark, sort, enabled, listen, port, protocol, spec_json, link_host, link_port, created_at, updated_at`
+// LinkAddr 为入站对外的一个连接地址，非空时取代服务器的公网地址。
+// Host 为空表示沿用服务器的全部公网地址、仅覆盖端口；Port 为 0 表示使用入站端口。
+type LinkAddr struct {
+	Host  string `json:"host"`
+	Port  int    `json:"port"`
+	Label string `json:"label"`
+}
+
+const inboundColumns = `id, node_id, remark, sort, enabled, listen, port, protocol, spec_json, link_addrs_json, created_at, updated_at`
 
 func scanInbound(r rowScanner) (*Inbound, error) {
 	var in Inbound
-	var spec string
+	var spec, addrs string
 	if err := r.Scan(&in.ID, &in.NodeID, &in.Remark, &in.Sort, &in.Enabled, &in.Listen, &in.Port, &in.Protocol,
-		&spec, &in.LinkHost, &in.LinkPort, &in.CreatedAt, &in.UpdatedAt); err != nil {
+		&spec, &addrs, &in.CreatedAt, &in.UpdatedAt); err != nil {
 		return nil, err
 	}
 	in.Spec = json.RawMessage(spec)
+	_ = json.Unmarshal([]byte(addrs), &in.LinkAddrs)
+	if in.LinkAddrs == nil {
+		in.LinkAddrs = []LinkAddr{}
+	}
 	return &in, nil
 }
 
@@ -84,9 +95,9 @@ func (s *Store) GetInbound(id int64) (*Inbound, error) {
 // CreateInbound 新建入站并排在最后，返回新 ID。
 func (s *Store) CreateInbound(in *Inbound) (int64, error) {
 	now := time.Now().Unix()
-	id, err := s.insertWithID("inbounds", `INSERT INTO inbounds (id, node_id, remark, sort, enabled, listen, port, protocol, spec_json, link_host, link_port, created_at, updated_at)
-		VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), -1) + 1 FROM inbounds), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		in.NodeID, in.Remark, in.Enabled, in.Listen, in.Port, in.Protocol, string(in.Spec), in.LinkHost, in.LinkPort, now, now)
+	id, err := s.insertWithID("inbounds", `INSERT INTO inbounds (id, node_id, remark, sort, enabled, listen, port, protocol, spec_json, link_addrs_json, created_at, updated_at)
+		VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), -1) + 1 FROM inbounds), ?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.NodeID, in.Remark, in.Enabled, in.Listen, in.Port, in.Protocol, string(in.Spec), marshalList(in.LinkAddrs), now, now)
 	if err != nil {
 		return 0, mapConstraint(err)
 	}
@@ -96,8 +107,8 @@ func (s *Store) CreateInbound(in *Inbound) (int64, error) {
 // UpdateInbound 更新入站的可编辑字段，所属服务器不可变。
 func (s *Store) UpdateInbound(in *Inbound) error {
 	res, err := s.db.Exec(`UPDATE inbounds SET remark = ?, enabled = ?, listen = ?, port = ?, protocol = ?, spec_json = ?,
-		link_host = ?, link_port = ?, updated_at = ? WHERE id = ?`,
-		in.Remark, in.Enabled, in.Listen, in.Port, in.Protocol, string(in.Spec), in.LinkHost, in.LinkPort, time.Now().Unix(), in.ID)
+		link_addrs_json = ?, updated_at = ? WHERE id = ?`,
+		in.Remark, in.Enabled, in.Listen, in.Port, in.Protocol, string(in.Spec), marshalList(in.LinkAddrs), time.Now().Unix(), in.ID)
 	if err != nil {
 		return mapConstraint(err)
 	}

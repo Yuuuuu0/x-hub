@@ -18,7 +18,7 @@ func openTest(t *testing.T) *Store {
 
 func TestIngestDedupAndRollup(t *testing.T) {
 	st := openTest(t)
-	nodeID, _ := st.CreateNode("n", "", "")
+	nodeID, _ := st.CreateNode("n", "", nil)
 	subID, _ := st.CreateSubscription(&Subscription{Name: "s", Token: "t", Secret: "x", UUID: "u", Enabled: true, AllInbounds: true})
 	now := time.Now().Truncate(time.Hour).Unix()
 	b1 := TrafficBatch{Seq: 1, Hour: now, Rows: []TrafficRow{{SubID: subID, InboundID: 7, Up: 10, Down: 100}}, NICRx: 1000, NICTx: 50}
@@ -69,10 +69,10 @@ func TestIngestDedupAndRollup(t *testing.T) {
 // TestIDNeverReused 删除最大 ID 的记录后，新记录不得复用该 ID，否则历史流量会错配。
 func TestIDNeverReused(t *testing.T) {
 	st := openTest(t)
-	n1, _ := st.CreateNode("a", "", "")
-	n2, _ := st.CreateNode("b", "", "")
+	n1, _ := st.CreateNode("a", "", nil)
+	n2, _ := st.CreateNode("b", "", nil)
 	st.DeleteNode(n2)
-	if n3, _ := st.CreateNode("c", "", ""); n3 == n2 || n3 <= n1 {
+	if n3, _ := st.CreateNode("c", "", nil); n3 == n2 || n3 <= n1 {
 		t.Fatalf("node id reused: %d after deleting %d", n3, n2)
 	}
 	in := &Inbound{NodeID: n1, Port: 1, Protocol: "vless", Spec: []byte("{}")}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -49,8 +50,8 @@ func fetchSub(h *Handler, token, ua, query string) *httptest.ResponseRecorder {
 // TestSubscriptionEndpoint 覆盖格式识别、入站范围、名称去重、停用与无效令牌。
 func TestSubscriptionEndpoint(t *testing.T) {
 	h := newTestHandler(t)
-	n1, _ := h.Store.CreateNode("东京", "", "jp.example.com")
-	n2, _ := h.Store.CreateNode("东京", "", "2001:db8::1")
+	n1, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "jp.example.com"}})
+	n2, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "2001:db8::1"}})
 	i1 := addInbound(t, h, n1, 443, "")
 	addInbound(t, h, n2, 443, "")
 	subID, _ := CreateSubscription(h.Store, "朋友A", "")
@@ -128,21 +129,21 @@ func TestSubscriptionEndpoint(t *testing.T) {
 // TestNodeNameVars 覆盖地区（检测与手动指定）、按计费方式计算的剩余流量与剩余天数。
 func TestNodeNameVars(t *testing.T) {
 	h := newTestHandler(t)
-	id, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	id, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "jp.example.com"}})
 	h.Store.UpdateNodeRuntime(id, "dev", "", nil, protocol.HostInfo{Country: "JP"}, "1.2.3.4")
 	n, _ := h.Store.GetNode(id)
 	if v := h.nameVars()(n); v.Flag != "🇯🇵" || v.Region != "日本" || v.Traffic != "" || v.Days != "" {
 		t.Fatalf("detected: %+v", v)
 	}
 	expire := time.Now().Add(69*24*time.Hour - time.Hour).Unix()
-	h.Store.UpdateNode(id, &store.NodeSettings{Name: "东京", PublicHost: "jp.example.com", NetResetDay: 1, NetQuota: 2 << 40,
+	h.Store.UpdateNode(id, &store.NodeSettings{Name: "东京", PublicHosts: []store.PublicAddr{{Host: "jp.example.com"}}, NetResetDay: 1, NetQuota: 2 << 40,
 		NetCountMode: "tx", Country: "HK", Region: "香港 CMI", ExpireAt: expire})
 	n, _ = h.Store.GetNode(id)
 	if v := h.nameVars()(n); v.Flag != "🇭🇰" || v.Region != "香港 CMI" || v.Traffic != "2TB" || v.Days != "69D" {
 		t.Fatalf("manual: %+v", v)
 	}
 	in := &store.Inbound{Remark: "acck", Port: 443}
-	if got := sub.Target(n, in, h.Settings.Subscription().NameTemplate, h.nameVars()(n)).Name; got != "🇭🇰 香港 CMI-acck|📊2TB|⏳69D" {
+	if got := sub.Targets(n, in, h.Settings.Subscription().NameTemplate, h.nameVars()(n))[0].Name; got != "🇭🇰 香港 CMI-acck|📊2TB|⏳69D" {
 		t.Fatalf("name: %q", got)
 	}
 }
@@ -150,7 +151,7 @@ func TestNodeNameVars(t *testing.T) {
 // TestSubscriptionExcludeScope 覆盖「全部入站，排除指定入站」：订阅输出与下发到入站的用户都不含被排除的入站。
 func TestSubscriptionExcludeScope(t *testing.T) {
 	h := newTestHandler(t)
-	n1, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	n1, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "jp.example.com"}})
 	i1 := addInbound(t, h, n1, 443, "主力")
 	i2 := addInbound(t, h, n1, 8443, "备用")
 	subID, _ := CreateSubscription(h.Store, "朋友A", "")
@@ -177,7 +178,7 @@ func TestSubscriptionExcludeScope(t *testing.T) {
 // TestSharePage 覆盖分享页的识别：浏览器打开返回页面，客户端与显式格式仍返回配置。
 func TestSharePage(t *testing.T) {
 	h := newTestHandler(t)
-	n1, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	n1, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "jp.example.com"}})
 	addInbound(t, h, n1, 443, "")
 	subID, _ := CreateSubscription(h.Store, "朋友A", "")
 	s, _ := h.Store.GetSubscription(subID)
@@ -228,8 +229,8 @@ func TestSharePage(t *testing.T) {
 // TestInboundOrder 覆盖入站排序：订阅节点跨服务器按面板顺序输出，新入站排在最后，调整顺序不改变下发给服务器的配置。
 func TestInboundOrder(t *testing.T) {
 	h := newTestHandler(t)
-	n1, _ := h.Store.CreateNode("东京", "", "jp.example.com")
-	n2, _ := h.Store.CreateNode("香港", "", "hk.example.com")
+	n1, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "jp.example.com"}})
+	n2, _ := h.Store.CreateNode("香港", "", []store.PublicAddr{{Host: "hk.example.com"}})
 	a := addInbound(t, h, n1, 1001, "A")
 	b := addInbound(t, h, n2, 1002, "B")
 	c := addInbound(t, h, n1, 1003, "C")
@@ -275,7 +276,7 @@ func TestInboundOrder(t *testing.T) {
 	if got := strings.Join(ports(), ""); got != ":1003:1001:1002:1004" {
 		t.Fatalf("new inbound must go last: %s", got)
 	}
-	n3, _ := h.Store.CreateNode("新加坡", "", "sg.example.com")
+	n3, _ := h.Store.CreateNode("新加坡", "", []store.PublicAddr{{Host: "sg.example.com"}})
 	if err := h.Store.ReorderNodes([]int64{n2, n1, n3}); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestInboundOrder(t *testing.T) {
 // TestRealityMLKEMByXrayVersion 覆盖 Mihomo 输出按服务器的 Xray 版本决定是否开启 support-x25519mlkem768。
 func TestRealityMLKEMByXrayVersion(t *testing.T) {
 	h := newTestHandler(t)
-	n, _ := h.Store.CreateNode("东京", "", "jp.example.com")
+	n, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "jp.example.com"}})
 	addInbound(t, h, n, 443, "主力")
 	subID, _ := CreateSubscription(h.Store, "朋友A", "")
 	h.Store.SetSubscriptionScope(subID, true, nil)
@@ -300,5 +301,54 @@ func TestRealityMLKEMByXrayVersion(t *testing.T) {
 		if got := strings.Count(body, "support-x25519mlkem768: true"); got != want {
 			t.Errorf("%q: got %d, want %d\n%s", version, got, want, body)
 		}
+	}
+}
+
+// TestMultiAddrs 覆盖服务器多个公网地址：每个地址一个节点、链式代理以主地址为前置、监听地址与 IPv6 冲突的校验。
+func TestMultiAddrs(t *testing.T) {
+	h := newTestHandler(t)
+	nid, _ := h.Store.CreateNode("东京", "", []store.PublicAddr{{Host: "1.2.3.4"}, {Host: "2001:db8::1", Label: "IPv6"}})
+	iid := addInbound(t, h, nid, 443, "acck")
+	subID, _ := CreateSubscription(h.Store, "A", "")
+	s, _ := h.Store.GetSubscription(subID)
+	addExternal(t, h, "家宽", "socks5://u:p@5.6.7.8:1080#家宽", "inbound:"+strconv.FormatInt(iid, 10), subID)
+
+	plain, _ := base64.StdEncoding.DecodeString(fetchSub(h, s.Token, "v2rayN", "").Body.String())
+	links := strings.Split(string(plain), "\n")
+	if len(links) != 2 || !strings.Contains(links[0], "@1.2.3.4:443") || !strings.Contains(links[1], "@[2001:db8::1]:443") ||
+		!strings.HasSuffix(links[1], "#acck%20IPv6") {
+		t.Fatalf("links: %v", links)
+	}
+	var cfg struct {
+		Proxies []map[string]any `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal(fetchSub(h, s.Token, "clash-verge", "").Body.Bytes(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Proxies) != 3 || cfg.Proxies[2]["dialer-proxy"] != "acck" {
+		t.Fatalf("proxies: %v", cfg.Proxies)
+	}
+
+	n, _ := h.Store.GetNode(nid)
+	in, _ := h.Store.GetInbound(iid)
+	in.Listen = "1.2.3.4"
+	if err := checkListenFamily(n, in); err == nil {
+		t.Fatal("listening on IPv4 must reject an IPv6 address")
+	}
+	in.LinkAddrs = []store.LinkAddr{{Host: "jp.example.com"}}
+	if err := checkListenFamily(n, in); err != nil {
+		t.Fatalf("domain address: %v", err)
+	}
+	in.Listen, in.LinkAddrs = "0.0.0.0", nil
+	if err := checkListenFamily(n, in); err != nil {
+		t.Fatalf("wildcard listen: %v", err)
+	}
+
+	bad := []store.PublicAddr{{Host: "1.2.3.4"}, {Host: " 1.2.3.4 "}}
+	if err := validateNode(&nodeInput{Name: "x", PublicHosts: bad}); err == nil {
+		t.Fatal("duplicate address must be rejected")
+	}
+	if err := validateNode(&nodeInput{Name: "x", PublicHosts: []store.PublicAddr{{Host: "1.2.3.4:443"}}}); err == nil {
+		t.Fatal("address with port must be rejected")
 	}
 }

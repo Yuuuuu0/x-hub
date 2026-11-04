@@ -15,7 +15,7 @@ type Node struct {
 	Name         string            `json:"name"`
 	Remark       string            `json:"remark"`
 	Sort         int               `json:"sort"`
-	PublicHost   string            `json:"publicHost"`
+	PublicHosts  []PublicAddr      `json:"publicHosts"`
 	Enrolled     bool              `json:"enrolled"`
 	AgentVersion string            `json:"agentVersion"`
 	XrayVersion  string            `json:"xrayVersion"`
@@ -40,10 +40,16 @@ type Node struct {
 	secretHash string
 }
 
+// PublicAddr 为服务器的一个公网地址，订阅中每个地址生成一个节点。Label 用于区分同一入站的多个节点，如 IPv6。
+type PublicAddr struct {
+	Host  string `json:"host"`
+	Label string `json:"label"`
+}
+
 // SecretHash 返回节点凭据哈希。
 func (n *Node) SecretHash() string { return n.secretHash }
 
-const nodeColumns = `id, name, remark, sort, public_host, secret_hash, agent_version, xray_version,
+const nodeColumns = `id, name, remark, sort, public_hosts_json, secret_hash, agent_version, xray_version,
 	capabilities_json, host_info_json, last_ip, last_seen_at, created_at, desired_rev, applied_rev, applied_hash, sync_error,
 	last_seq, net_reset_day, net_quota_bytes, xray_pinned_version, country, region, expire_at, net_count_mode`
 
@@ -51,8 +57,8 @@ type rowScanner interface{ Scan(dest ...any) error }
 
 func scanNode(r rowScanner) (*Node, error) {
 	var n Node
-	var caps, host string
-	if err := r.Scan(&n.ID, &n.Name, &n.Remark, &n.Sort, &n.PublicHost, &n.secretHash, &n.AgentVersion,
+	var caps, host, hosts string
+	if err := r.Scan(&n.ID, &n.Name, &n.Remark, &n.Sort, &hosts, &n.secretHash, &n.AgentVersion,
 		&n.XrayVersion, &caps, &host, &n.LastIP, &n.LastSeenAt, &n.CreatedAt, &n.DesiredRev, &n.AppliedRev,
 		&n.AppliedHash, &n.SyncError, &n.LastSeq, &n.NetResetDay, &n.NetQuota, &n.XrayPinned, &n.Country, &n.Region,
 		&n.ExpireAt, &n.NetCountMode); err != nil {
@@ -61,6 +67,10 @@ func scanNode(r rowScanner) (*Node, error) {
 	n.Enrolled = n.secretHash != ""
 	_ = json.Unmarshal([]byte(caps), &n.Caps)
 	_ = json.Unmarshal([]byte(host), &n.Host)
+	_ = json.Unmarshal([]byte(hosts), &n.PublicHosts)
+	if n.PublicHosts == nil {
+		n.PublicHosts = []PublicAddr{}
+	}
 	if n.Caps == nil {
 		n.Caps = []string{}
 	}
@@ -95,10 +105,10 @@ func (s *Store) GetNode(id int64) (*Node, error) {
 }
 
 // CreateNode 新建服务器记录，返回新 ID。
-func (s *Store) CreateNode(name, remark, publicHost string) (int64, error) {
-	return s.insertWithID("nodes", `INSERT INTO nodes (id, name, remark, sort, public_host, created_at)
+func (s *Store) CreateNode(name, remark string, publicHosts []PublicAddr) (int64, error) {
+	return s.insertWithID("nodes", `INSERT INTO nodes (id, name, remark, sort, public_hosts_json, created_at)
 		VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort), -1) + 1 FROM nodes), ?, ?)`,
-		name, remark, publicHost, time.Now().Unix())
+		name, remark, marshalList(publicHosts), time.Now().Unix())
 }
 
 // ReorderNodes 按 ids 的先后设置服务器顺序。
@@ -106,22 +116,22 @@ func (s *Store) ReorderNodes(ids []int64) error { return s.reorder("nodes", ids)
 
 // NodeSettings 为服务器的可编辑字段。
 type NodeSettings struct {
-	Name         string `json:"name"`
-	Remark       string `json:"remark"`
-	PublicHost   string `json:"publicHost"`
-	NetResetDay  int    `json:"netResetDay"`
-	NetQuota     int64  `json:"netQuotaBytes"`
-	NetCountMode string `json:"netCountMode"`
-	Country      string `json:"country"`
-	Region       string `json:"region"`
-	ExpireAt     int64  `json:"expireAt"`
+	Name         string       `json:"name"`
+	Remark       string       `json:"remark"`
+	PublicHosts  []PublicAddr `json:"publicHosts"`
+	NetResetDay  int          `json:"netResetDay"`
+	NetQuota     int64        `json:"netQuotaBytes"`
+	NetCountMode string       `json:"netCountMode"`
+	Country      string       `json:"country"`
+	Region       string       `json:"region"`
+	ExpireAt     int64        `json:"expireAt"`
 }
 
 // UpdateNode 更新服务器的可编辑字段。
 func (s *Store) UpdateNode(id int64, in *NodeSettings) error {
-	return s.execOne(`UPDATE nodes SET name = ?, remark = ?, public_host = ?, net_reset_day = ?, net_quota_bytes = ?, net_count_mode = ?,
+	return s.execOne(`UPDATE nodes SET name = ?, remark = ?, public_hosts_json = ?, net_reset_day = ?, net_quota_bytes = ?, net_count_mode = ?,
 		country = ?, region = ?, expire_at = ? WHERE id = ?`,
-		in.Name, in.Remark, in.PublicHost, in.NetResetDay, in.NetQuota, in.NetCountMode, in.Country, in.Region, in.ExpireAt, id)
+		in.Name, in.Remark, marshalList(in.PublicHosts), in.NetResetDay, in.NetQuota, in.NetCountMode, in.Country, in.Region, in.ExpireAt, id)
 }
 
 // DeleteNode 删除服务器。
@@ -129,12 +139,14 @@ func (s *Store) DeleteNode(id int64) error {
 	return s.execOne("DELETE FROM nodes WHERE id = ?", id)
 }
 
-// UpdateNodeRuntime 记录被控端上报的运行时信息。publicHost 为空时用连接来源 IP 补全。
+// UpdateNodeRuntime 记录被控端上报的运行时信息。未设置公网地址时用连接来源 IP 补全。
 func (s *Store) UpdateNodeRuntime(id int64, agentVersion, xrayVersion string, caps []string, host protocol.HostInfo, ip string) error {
 	capsJSON, _ := json.Marshal(caps)
 	hostJSON, _ := json.Marshal(host)
 	_, err := s.db.Exec(`UPDATE nodes SET agent_version = ?, xray_version = ?, capabilities_json = ?, host_info_json = ?,
-		last_ip = ?, last_seen_at = ?, public_host = CASE WHEN public_host = '' THEN ? ELSE public_host END WHERE id = ?`,
+		last_ip = ?, last_seen_at = ?,
+		public_hosts_json = CASE WHEN public_hosts_json = '[]' THEN json_array(json_object('host', ?, 'label', '')) ELSE public_hosts_json END
+		WHERE id = ?`,
 		agentVersion, xrayVersion, string(capsJSON), string(hostJSON), ip, time.Now().Unix(), ip, id)
 	return err
 }
@@ -223,6 +235,15 @@ func (s *Store) ConsumeEnrollToken(tokenHash, secretHash string) (int64, error) 
 		return 0, err
 	}
 	return nodeID, tx.Commit()
+}
+
+// marshalList 把地址列表序列化为 JSON，nil 视为空数组。
+func marshalList[T any](list []T) string {
+	if len(list) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(list)
+	return string(b)
 }
 
 func (s *Store) execOne(query string, args ...any) error {

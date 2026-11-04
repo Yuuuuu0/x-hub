@@ -4,6 +4,7 @@ package sub
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -83,24 +84,61 @@ func realityNeedsMLKEM(version string) bool {
 	return ok && v.Compare(realityMLKEMAfter) > 0
 }
 
-// Target 计算入站对外的连接信息与按模板生成的名称。模板变量：{node} 服务器名称、{remark} 入站备注、
-// {port} 端口、{flag} 旗帜、{region} 地区、{traffic} 剩余流量、{days} 剩余天数。
-func Target(n *store.Node, in *store.Inbound, nameTemplate string, v NameVars) model.LinkTarget {
-	t := model.LinkTarget{Host: in.LinkHost, Port: in.LinkPort, RealityMLKEM: realityNeedsMLKEM(n.XrayVersion)}
-	if t.Host == "" {
-		t.Host = n.PublicHost
+// Targets 计算入站对外的全部连接信息与按模板生成的名称，每个地址一项，地址与端口相同的只保留一项。
+// 入站设置了连接地址时取代服务器公网地址，其中 Host 为空的项展开为服务器的全部公网地址并覆盖端口。
+// 模板变量：{node} 服务器名称、{remark} 入站备注、{port} 端口、{flag} 旗帜、{region} 地区、
+// {traffic} 剩余流量、{days} 剩余天数、{line} 地址标签；模板未使用 {line} 时标签追加在第一段末尾。
+func Targets(n *store.Node, in *store.Inbound, nameTemplate string, v NameVars) []model.LinkTarget {
+	var addrs []store.LinkAddr
+	server := func(port int, label string) {
+		for _, a := range n.PublicHosts {
+			addrs = append(addrs, store.LinkAddr{Host: a.Host, Port: port, Label: joinLabel(a.Label, label)})
+		}
 	}
-	if t.Port == 0 {
-		t.Port = in.Port
+	if len(in.LinkAddrs) == 0 {
+		server(0, "")
 	}
-	t.Name = RenderName(nameTemplate, map[string]string{
-		"node": n.Name, "remark": in.Remark, "port": strconv.Itoa(in.Port),
-		"flag": v.Flag, "region": v.Region, "traffic": v.Traffic, "days": v.Days,
-	})
-	if t.Name == "" {
-		t.Name = n.Name
+	for _, a := range in.LinkAddrs {
+		if a.Host == "" {
+			server(a.Port, a.Label)
+		} else {
+			addrs = append(addrs, a)
+		}
 	}
-	return t
+	hasLine := strings.Contains(nameTemplate, "{line}")
+	mlkem := realityNeedsMLKEM(n.XrayVersion)
+	seen := map[string]bool{}
+	var out []model.LinkTarget
+	for _, a := range addrs {
+		if a.Port == 0 {
+			a.Port = in.Port
+		}
+		key := net.JoinHostPort(a.Host, strconv.Itoa(a.Port))
+		if a.Host == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		name := RenderName(nameTemplate, map[string]string{
+			"node": n.Name, "remark": in.Remark, "port": strconv.Itoa(in.Port),
+			"flag": v.Flag, "region": v.Region, "traffic": v.Traffic, "days": v.Days, "line": a.Label,
+		})
+		if name == "" {
+			name = n.Name
+		}
+		if !hasLine && a.Label != "" {
+			first, rest, ok := strings.Cut(name, "|")
+			if name = joinLabel(first, a.Label); ok {
+				name += "|" + rest
+			}
+		}
+		out = append(out, model.LinkTarget{Host: a.Host, Port: a.Port, Name: name, RealityMLKEM: mlkem})
+	}
+	return out
+}
+
+// joinLabel 以空格连接非空的标签。
+func joinLabel(a, b string) string {
+	return strings.TrimSpace(a + " " + b)
 }
 
 var nameVar = regexp.MustCompile(`\{([a-z]+)\}`)
@@ -151,7 +189,8 @@ func FormatRemaining(b int64) string {
 	return ""
 }
 
-// Collect 收集订阅可用的节点：入站已启用、在订阅范围内（未被排除或被授权）、服务器已设置公网地址。名称重复时追加序号。
+// Collect 收集订阅可用的节点：入站已启用、在订阅范围内（未被排除或被授权）、有对外地址，每个地址一个节点。
+// 名称重复时追加序号。
 // vars 返回各服务器的名称变量。
 func Collect(st *store.Store, s *store.Subscription, nameTemplate string, vars func(*store.Node) NameVars) ([]Node, error) {
 	nodes, err := st.ListNodes()
@@ -187,19 +226,17 @@ func Collect(st *store.Store, s *store.Subscription, nameTemplate string, vars f
 			continue
 		}
 		n := byID[in.NodeID]
-		t := Target(n, in, nameTemplate, vars(n))
-		if t.Host == "" {
-			continue
-		}
-		if seen[t.Name]++; seen[t.Name] > 1 {
-			t.Name = fmt.Sprintf("%s %d", t.Name, seen[t.Name])
-		}
 		cred := model.CredentialFor(in.Protocol, spec, s.UUID, s.Secret, in.ID)
-		sb, _ := model.SingBox(in.Protocol, spec, t, cred)
-		out = append(out, Node{
-			Name: t.Name, InboundID: in.ID, Link: model.ShareLink(in.Protocol, spec, t, cred),
-			Mihomo: model.Mihomo(in.Protocol, spec, t, cred), SingBox: sb,
-		})
+		for _, t := range Targets(n, in, nameTemplate, vars(n)) {
+			if seen[t.Name]++; seen[t.Name] > 1 {
+				t.Name = fmt.Sprintf("%s %d", t.Name, seen[t.Name])
+			}
+			sb, _ := model.SingBox(in.Protocol, spec, t, cred)
+			out = append(out, Node{
+				Name: t.Name, InboundID: in.ID, Link: model.ShareLink(in.Protocol, spec, t, cred),
+				Mihomo: model.Mihomo(in.Protocol, spec, t, cred), SingBox: sb,
+			})
+		}
 	}
 	return out, nil
 }
