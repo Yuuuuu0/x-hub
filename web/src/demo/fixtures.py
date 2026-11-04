@@ -44,11 +44,11 @@ call('PUT', 'settings/certs', {'acmeEmail': 'admin@example.com', 'cloudflareToke
 day = 86400; now = int(time.time())
 G = 1 << 30
 nodes = [
-  dict(name='tokyo-1', remark='', publicHost='203.0.113.11', country='JP', region='', netResetDay=1, netQuotaBytes=2048*G, netCountMode='tx', expireAt=now+69*day),
-  dict(name='hk-hkt', remark='', publicHost='203.0.113.22', country='HK', region='', netResetDay=15, netQuotaBytes=1024*G, netCountMode='both', expireAt=now+142*day),
-  dict(name='sg-1', remark='', publicHost='203.0.113.33', country='SG', region='', netResetDay=1, netQuotaBytes=1024*G, netCountMode='max', expireAt=now+23*day),
-  dict(name='us-lax', remark='', publicHost='198.51.100.44', country='US', region='洛杉矶', netResetDay=8, netQuotaBytes=3072*G, netCountMode='tx', expireAt=now+301*day),
-  dict(name='de-fra', remark='', publicHost='198.51.100.55', country='DE', region='', netResetDay=1, netQuotaBytes=0, netCountMode='both', expireAt=0),
+  dict(name='tokyo-1', remark='', publicHosts=[dict(host='203.0.113.11', label='')], country='JP', region='', netResetDay=1, netQuotaBytes=2048*G, netCountMode='tx', expireAt=now+69*day),
+  dict(name='hk-hkt', remark='', publicHosts=[dict(host='203.0.113.22', label='')], country='HK', region='', netResetDay=15, netQuotaBytes=1024*G, netCountMode='both', expireAt=now+142*day),
+  dict(name='sg-1', remark='', publicHosts=[dict(host='203.0.113.33', label='')], country='SG', region='', netResetDay=1, netQuotaBytes=1024*G, netCountMode='max', expireAt=now+23*day),
+  dict(name='us-lax', remark='', publicHosts=[dict(host='198.51.100.44', label='')], country='US', region='洛杉矶', netResetDay=8, netQuotaBytes=3072*G, netCountMode='tx', expireAt=now+301*day),
+  dict(name='de-fra', remark='', publicHosts=[dict(host='198.51.100.55', label='')], country='DE', region='', netResetDay=1, netQuotaBytes=0, netCountMode='both', expireAt=0),
 ]
 ids = []
 for n in nodes:
@@ -71,7 +71,7 @@ ins = [
 ]
 iids = []
 for nid, rm, port, proto, spec in ins:
-    iids.append(call('POST', 'inbounds', {'nodeId': nid, 'remark': rm, 'enabled': True, 'listen': '', 'port': port, 'protocol': proto, 'spec': spec, 'linkHost': '', 'linkPort': 0})['id'])
+    iids.append(call('POST', 'inbounds', {'nodeId': nid, 'remark': rm, 'enabled': True, 'listen': '', 'port': port, 'protocol': proto, 'spec': spec, 'linkAddrs': []})['id'])
 subs = call('GET', 'subscriptions')['subscriptions']
 call('PUT', f"subscriptions/{subs[0]['id']}", {'name': subs[0]['name'], 'note': '自用全部节点', 'enabled': True})
 for name, note, allin, inb, lim, exp, rd in [
@@ -134,14 +134,14 @@ rt = [  # cpu, mem frac, disk frac, rx rate, tx rate, period rx, tx, uptime days
 for n, h, r in zip(d['nodes']['nodes'], hosts, rt):
     name, plat, pv, kern, arch, cpu, cores, mem, disk = h
     c, mf, df, rx, tx, prx, ptx, up = r
-    n.update(enrolled=True, agentVersion=av, xrayVersion=xv, caps=['x25519mlkem768'] if False else n['caps'], lastIp=n['publicHost'], lastSeenAt=now,
+    n.update(enrolled=True, agentVersion=av, xrayVersion=xv, caps=['x25519mlkem768'] if False else n['caps'], lastIp=n['publicHosts'][0]['host'], lastSeenAt=now,
              appliedRev=n['desiredRev'], appliedHash='demo', syncState='synced', syncError='')
     n['host'] = dict(hostname=name, os='linux', platform=plat, platformVersion=pv, kernel=kern, arch=arch, cpuModel=cpu, cpuCores=cores)
     n['geo']['detected'] = n['geo']['code']
     mode = n['netCountMode']
     used = {'both': prx + ptx, 'tx': ptx, 'max': max(prx, ptx)}[mode]
     n['netPeriod'].update(rx=int(prx), tx=int(ptx), used=int(used))
-    n['runtime'] = dict(online=True, connectedAt=now - 3*86400, ip=n['publicHost'], rxRate=int(rx), txRate=int(tx), caps=None,
+    n['runtime'] = dict(online=True, connectedAt=now - 3*86400, ip=n['publicHosts'][0]['host'], rxRate=int(rx), txRate=int(tx), caps=None,
       xray=dict(installed=True, version=xv, enabled=True, running=True, startedAt=now - 3*86400),
       heartbeat=dict(cpu=c, memUsed=int(mem*G*mf), memTotal=mem*G, swapUsed=0, swapTotal=(1*G if mem < 4 else 0), diskUsed=int(disk*G*df), diskTotal=disk*G,
         load1=round(c/100*cores*1.3, 2), load5=round(c/100*cores*1.1, 2), load15=round(c/100*cores, 2), uptime=up*86400, netRx=int(prx*3), netTx=int(ptx*3)))

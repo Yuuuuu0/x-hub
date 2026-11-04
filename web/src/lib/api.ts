@@ -85,11 +85,24 @@ export interface HostInfo {
   cpuCores: number
 }
 
+/** 服务器的一个公网地址，订阅中每个地址生成一个节点；label 用于区分，如 IPv6。 */
+export interface PublicAddr {
+  host: string
+  label: string
+}
+
+/** 入站的一个连接地址：host 为空表示沿用服务器全部公网地址、仅覆盖端口；port 为 0 表示使用入站端口。 */
+export interface LinkAddr {
+  host: string
+  port: number
+  label: string
+}
+
 export interface NodeItem {
   id: number
   name: string
   remark: string
-  publicHost: string
+  publicHosts: PublicAddr[]
   enrolled: boolean
   agentVersion: string
   xrayVersion: string
@@ -241,8 +254,7 @@ export interface InboundItem {
   port: number
   protocol: 'vless' | 'vmess' | 'trojan' | 'shadowsocks'
   spec: InboundSpec
-  linkHost: string
-  linkPort: number
+  linkAddrs: LinkAddr[]
   createdAt: number
   updatedAt: number
 }
@@ -288,6 +300,8 @@ export interface SubscriptionSettings {
 export interface ShareLink {
   subscriptionId: number
   subscriptionName: string
+  addr: string // 连接地址与端口，区分同一入站的多个地址
+  name: string
   link: string
 }
 

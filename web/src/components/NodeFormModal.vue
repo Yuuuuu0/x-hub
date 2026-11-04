@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { api, type CountryItem, type NodeItem } from '../lib/api'
+import { api, type CountryItem, type NodeItem, type PublicAddr } from '../lib/api'
+import AddrListEditor from './AddrListEditor.vue'
 
 // 新建或编辑服务器：基本信息、地区与 VPS 套餐（流量配额、计费方式、到期时间）。
 const props = defineProps<{ node: NodeItem | null; countries: CountryItem[] }>()
@@ -17,7 +18,7 @@ const COUNT_MODES = [
 ]
 const form = reactive({
   name: '',
-  publicHost: '',
+  publicHosts: [] as PublicAddr[],
   remark: '',
   country: '',
   region: '',
@@ -33,7 +34,7 @@ watch(open, (v) => {
   const n = props.node
   Object.assign(form, {
     name: n?.name ?? '',
-    publicHost: n?.publicHost ?? '',
+    publicHosts: (n?.publicHosts ?? []).map((a) => ({ ...a })),
     remark: n?.remark ?? '',
     country: n?.country ?? '',
     region: n?.region ?? '',
@@ -62,7 +63,7 @@ async function save() {
     const created = !props.node
     const body = {
       name: form.name,
-      publicHost: form.publicHost,
+      publicHosts: form.publicHosts.filter((a) => a.host.trim() || a.label.trim()),
       remark: form.remark,
       country: form.country,
       region: form.region,
@@ -95,8 +96,11 @@ async function save() {
       <a-form-item label="名称" required>
         <a-input v-model:value="form.name" :maxlength="32" placeholder="如：东京-01" />
       </a-form-item>
-      <a-form-item label="公网地址" extra="生成分享链接时使用的域名或 IP。留空则在接入后自动填入连接来源 IP。">
-        <a-input v-model:value="form.publicHost" class="mono" placeholder="jp1.example.com" />
+      <a-form-item
+        label="公网地址"
+        extra="生成分享链接时使用的域名或 IP。有多个地址（如 IPv4 与 IPv6）时每个地址生成一个节点，标签会加在节点名称中。留空则在接入后自动填入连接来源 IP。"
+      >
+        <AddrListEditor v-model="form.publicHosts" host-placeholder="jp1.example.com" />
       </a-form-item>
       <div class="row">
         <a-form-item label="国家或地区" extra="被控端会按出口 IP 自动识别，也可以手动指定。">

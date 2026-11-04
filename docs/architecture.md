@@ -335,7 +335,7 @@ settings(key PK, value_json)
 
 nodes(
   id, name, remark, sort, enabled,
-  public_host,
+  public_hosts_json /*[{host,label}]，每个地址在订阅中生成一个节点*/,
   secret_hash,
   desired_rev, desired_hash, applied_rev, applied_hash,
   sync_state /*pending|ok|failed*/, sync_error,
@@ -349,7 +349,7 @@ enroll_tokens(id, node_id, token_hash, expire_at, used_at)
 inbounds(
   id, node_id /*FK CASCADE*/, tag /*in-{id}*/, remark, sort, enabled,
   listen, port, protocol, spec_json,
-  link_host_override, link_port_override,
+  link_addrs_json /*[{host,port,label}]，非空时取代服务器地址；host 为空表示沿用服务器地址、仅覆盖端口*/,
   created_at, updated_at,
   UNIQUE(node_id, port)
 )

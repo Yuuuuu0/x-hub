@@ -2,7 +2,8 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { Dice5, FileCheck2, KeyRound, Plus, Radar, Shuffle } from 'lucide-vue-next'
-import { api, type CertProbe, type InboundItem, type NodeItem, type ProbeTargetResult } from '../lib/api'
+import { api, type CertProbe, type InboundItem, type LinkAddr, type NodeItem, type ProbeTargetResult } from '../lib/api'
+import AddrListEditor from './AddrListEditor.vue'
 import { datetime } from '../lib/format'
 import { PRESETS, presetOf, type Preset } from '../lib/presets'
 
@@ -56,8 +57,7 @@ const form = reactive({
   enabled: true,
   listen: '',
   port: 443,
-  linkHost: '',
-  linkPort: 0,
+  linkAddrs: [] as LinkAddr[],
   preset: PRESETS[0].key,
   spec: blankSpec(),
 })
@@ -151,14 +151,14 @@ watch(open, async (v) => {
     const spec = JSON.parse(JSON.stringify(src.spec))
     Object.assign(form, {
       nodeId: src.nodeId, remark: src.remark, enabled: src.enabled, listen: src.listen, port: src.port,
-      linkHost: src.linkHost, linkPort: src.linkPort, preset: presetOf(src)?.key ?? PRESETS[0].key,
+      linkAddrs: (src.linkAddrs ?? []).map((a) => ({ ...a })), preset: presetOf(src)?.key ?? PRESETS[0].key,
       spec: { ...base, ...spec, vless: spec.vless ?? base.vless, reality: spec.reality ?? base.reality, tls: spec.tls ?? base.tls, ws: spec.ws ?? base.ws, xhttp: spec.xhttp ?? base.xhttp, ss: spec.ss ?? base.ss },
     })
     return
   }
   Object.assign(form, {
     nodeId: props.nodes[0]?.id, remark: '', enabled: true, listen: '', port: 443,
-    linkHost: '', linkPort: 0, preset: PRESETS[0].key, spec: blankSpec(),
+    linkAddrs: [], preset: PRESETS[0].key, spec: blankSpec(),
   })
   try {
     await Promise.all([genKeys(), addShortId()])
@@ -207,7 +207,10 @@ async function save() {
   saving.value = true
   try {
     const { preset: _, ...rest } = form
-    const body = { ...rest, protocol: preset.value.protocol, linkPort: form.linkPort || 0 }
+    const linkAddrs = form.linkAddrs
+      .filter((a) => a.host.trim() || a.port || a.label.trim())
+      .map((a) => ({ ...a, port: a.port || 0 }))
+    const body = { ...rest, protocol: preset.value.protocol, linkAddrs }
     if (editing.value) await api.put(`inbounds/${props.inbound!.id}`, body)
     else await api.post('inbounds', body)
     message.success(editing.value ? '已保存，正在下发到服务器' : '已创建，正在下发到服务器')
@@ -415,17 +418,15 @@ async function save() {
           >
             <a-input v-model:value="form.spec.reality.minClientVer" class="mono" placeholder="Xray 默认" />
           </a-form-item>
-          <a-form-item label="监听 IP" extra="留空监听全部地址。">
+          <a-form-item label="监听 IP" extra="留空监听全部地址（同时支持 IPv4 与 IPv6）。">
             <a-input v-model:value="form.listen" class="mono" placeholder="0.0.0.0" />
           </a-form-item>
-          <div class="row">
-            <a-form-item label="链接地址" extra="留空使用服务器公网地址；套 CDN 时填写 CDN 域名或优选 IP。">
-              <a-input v-model:value="form.linkHost" class="mono" />
-            </a-form-item>
-            <a-form-item label="链接端口" extra="0 表示使用入站端口，适用于端口转发场景。">
-              <a-input-number v-model:value="form.linkPort" :min="0" :max="65535" class="full mono" />
-            </a-form-item>
-          </div>
+          <a-form-item
+            label="连接地址"
+            extra="留空使用服务器的公网地址；填写后取代服务器地址，每个地址生成一个节点。套 CDN 时填写 CDN 域名或优选 IP；地址留空只填端口表示沿用服务器全部地址、改用该端口（端口转发场景）；端口留空表示使用入站端口。"
+          >
+            <AddrListEditor v-model="form.linkAddrs" with-port host-placeholder="留空沿用服务器地址" />
+          </a-form-item>
         </a-collapse-panel>
       </a-collapse>
     </a-form>

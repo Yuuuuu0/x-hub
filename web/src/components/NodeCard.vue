@@ -110,7 +110,10 @@ function onMenu({ key }: { key: string | number }) {
           </a-tooltip>
         </h3>
         <p class="sub mono">
-          {{ node.publicHost || '—' }}<template v-if="sys"> · {{ sys }}</template>
+          <a-tooltip v-if="node.publicHosts.length > 1" :title="node.publicHosts.map((a) => a.label ? `${a.host}（${a.label}）` : a.host).join('，')">
+            <span>{{ node.publicHosts[0].host }} +{{ node.publicHosts.length - 1 }}</span>
+          </a-tooltip>
+          <template v-else>{{ node.publicHosts[0]?.host || '—' }}</template><template v-if="sys"> · {{ sys }}</template>
         </p>
       </div>
       <a-dropdown trigger="click" placement="bottomRight">

@@ -6,18 +6,22 @@ import QRCode from 'qrcode'
 import { api, type InboundItem, type ShareLink } from '../lib/api'
 import { copyText } from '../lib/clipboard'
 
-// 单个入站的分享链接与二维码，按订阅区分凭据。
+// 单个入站的分享链接与二维码，按订阅区分凭据；入站有多个对外地址时另按地址切换。
 const props = defineProps<{ inbound: InboundItem | null }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const links = ref<ShareLink[]>([])
 const selected = ref<number>()
+const selectedAddr = ref('')
 const qr = ref('')
 const loading = ref(false)
 const error = ref('')
 const copied = ref(false)
 
-const current = computed(() => links.value.find((l) => l.subscriptionId === selected.value))
+/** 按订阅去重的选项与按地址去重的选项，保持接口返回的顺序。 */
+const subOptions = computed(() => [...new Map(links.value.map((l) => [l.subscriptionId, { value: l.subscriptionId, label: l.subscriptionName }])).values()])
+const addrOptions = computed(() => [...new Set(links.value.map((l) => l.addr))].map((a) => ({ value: a, label: a })))
+const current = computed(() => links.value.find((l) => l.subscriptionId === selected.value && l.addr === selectedAddr.value))
 
 watch(open, async (v) => {
   if (!v || !props.inbound) return
@@ -28,6 +32,7 @@ watch(open, async (v) => {
     const r = await api.get<{ links: ShareLink[] }>(`inbounds/${props.inbound.id}/links`)
     links.value = r.links
     selected.value = r.links[0]?.subscriptionId
+    selectedAddr.value = r.links[0]?.addr ?? ''
   } catch (e: any) {
     error.value = e.message
   } finally {
@@ -58,8 +63,9 @@ async function copy() {
     <a-empty v-else-if="!links.length" description="没有可用的订阅，请先在「订阅」中创建或启用订阅" />
     <div v-else class="body">
       <a-alert v-if="!inbound?.enabled" type="info" show-icon message="该入站已停用，链接暂时无法连接" class="tip" />
-      <a-segmented v-if="links.length > 1" v-model:value="selected" :options="links.map((l) => ({ value: l.subscriptionId, label: l.subscriptionName }))" block />
+      <a-segmented v-if="subOptions.length > 1" v-model:value="selected" :options="subOptions" block />
       <p v-else class="muted who">订阅：{{ links[0].subscriptionName }}</p>
+      <a-select v-if="addrOptions.length > 1" v-model:value="selectedAddr" :options="addrOptions" class="mono" aria-label="连接地址" />
       <div class="qr"><img v-if="qr" :src="qr" alt="分享二维码" /></div>
       <div class="link mono">{{ current?.link }}</div>
       <a-button type="primary" block class="copy" @click="copy">

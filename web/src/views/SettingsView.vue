@@ -47,8 +47,9 @@ const NAME_VARS = [
   ['port', '端口'],
   ['traffic', '剩余流量'],
   ['days', '剩余天数'],
+  ['line', '地址标签'],
 ]
-const SAMPLE: Record<string, string> = { flag: '🇯🇵', region: '日本', remark: 'acck', node: '东京-01', port: '443', traffic: '1.14TB', days: '69D' }
+const SAMPLE: Record<string, string> = { flag: '🇯🇵', region: '日本', remark: 'acck', node: '东京-01', port: '443', traffic: '1.14TB', days: '69D', line: '' }
 
 /** 与主控 sub.RenderName 一致：以 | 分段，某段变量全部为空时省略，并去掉首尾连接符。 */
 function renderName(tmpl: string, vars: Record<string, string>) {
@@ -70,6 +71,14 @@ function renderName(tmpl: string, vars: Record<string, string>) {
 }
 const namePreview = computed(() => renderName(subSettings.nameTemplate, SAMPLE))
 const namePreviewBare = computed(() => renderName(subSettings.nameTemplate, { ...SAMPLE, remark: '', traffic: '', days: '' }))
+/** 与主控 sub.Targets 一致：模板未使用 {line} 时，地址标签追加在第一段末尾。 */
+const namePreviewLine = computed(() => {
+  const tmpl = subSettings.nameTemplate
+  const name = renderName(tmpl, { ...SAMPLE, line: 'IPv6' })
+  if (tmpl.includes('{line}')) return name
+  const [first, ...rest] = name.split('|')
+  return [`${first} IPv6`.trim(), ...rest].join('|')
+})
 
 const sessionHours = ref(168)
 const account = reactive({ username: '', currentPassword: '', newPassword: '', confirm: '' })
@@ -440,12 +449,15 @@ async function saveAccount() {
                 <p class="vars">
                   <span v-for="[k, label] in NAME_VARS" :key="k"><code class="mono">{{ '{' + k + '}' }}</code>{{ label }}</span>
                 </p>
-                <p class="muted">以 | 分段，某段中的变量都为空时整段省略（如服务器未设置流量配额或到期时间）。剩余流量与天数取自服务器的 VPS 套餐设置。</p>
+                <p class="muted">以 | 分段，某段中的变量都为空时整段省略（如服务器未设置流量配额或到期时间）。剩余流量与天数取自服务器的 VPS 套餐设置。地址标签来自服务器公网地址或入站连接地址，模板中未使用时自动追加在第一段末尾。</p>
                 <p class="preview">
                   <span class="muted">预览</span><span class="mono">{{ namePreview || '（空）' }}</span>
                 </p>
                 <p class="preview">
                   <span class="muted">无备注与套餐</span><span class="mono">{{ namePreviewBare || '（空，使用服务器名称）' }}</span>
+                </p>
+                <p class="preview">
+                  <span class="muted">地址标签 IPv6</span><span class="mono">{{ namePreviewLine }}</span>
                 </p>
               </div>
             </a-form-item>
