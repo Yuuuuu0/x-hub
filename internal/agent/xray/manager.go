@@ -302,10 +302,12 @@ func (m *Manager) stopProc() {
 	m.log.Info("xray stopped")
 }
 
+// command 构造 Xray 子进程：资源文件从 bin 目录读取；相对证书路径按数据目录解析
+// （Xray 不按工作目录解析证书，未设置 XRAY_LOCATION_CERT 时会去可执行文件所在的 bin 目录查找）。
 func (m *Manager) command(args ...string) *exec.Cmd {
 	cmd := exec.Command(m.binPath(), args...)
 	cmd.Dir = m.dir
-	cmd.Env = append(os.Environ(), "XRAY_LOCATION_ASSET="+m.binDir())
+	cmd.Env = append(os.Environ(), "XRAY_LOCATION_ASSET="+m.binDir(), "XRAY_LOCATION_CERT="+m.dir)
 	return cmd
 }
 

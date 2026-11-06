@@ -1,6 +1,6 @@
 package model
 
-// 被控端证书目录（相对 Xray 工作目录，即被控端数据目录）。ACME 证书由被控端写入此处。
+// 被控端证书目录（相对被控端数据目录，被控端通过 XRAY_LOCATION_CERT 让 Xray 按此解析）。ACME 证书由被控端写入此处。
 const acmeCertDir = "certs"
 
 // ACMECertPaths 返回 ACME 证书在被控端的相对路径。
