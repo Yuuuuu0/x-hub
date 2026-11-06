@@ -5,6 +5,7 @@ package accounting
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/Yuuuuu0/x-hub/internal/master/model"
@@ -22,6 +23,8 @@ type Service struct {
 	settings *settings.Service
 	syncer   Syncer
 	log      *slog.Logger
+
+	evalMu sync.Mutex // 串行化 Evaluate
 }
 
 // New 创建核算服务。
@@ -62,7 +65,10 @@ func (a *Service) LastSeq(nodeID int64) int64 {
 }
 
 // Evaluate 重新计算指定订阅（为空时全部订阅）的周期与状态，有变化时触发同步。
+// 定时任务、流量入库与管理接口可能并发调用，加锁串行执行，避免基于旧快照重复重置或写回过期状态。
 func (a *Service) Evaluate(ids ...int64) {
+	a.evalMu.Lock()
+	defer a.evalMu.Unlock()
 	var subs []*store.Subscription
 	if len(ids) == 0 {
 		all, err := a.store.ListSubscriptions()
@@ -83,12 +89,20 @@ func (a *Service) Evaluate(ids ...int64) {
 	for _, s := range subs {
 		if s.ResetDay > 0 {
 			if start := PeriodStart(s.ResetDay, now, loc); s.PeriodStart < start.Unix() {
-				if err := a.store.ResetSubscriptionUsage(s.ID, start.Unix()); err != nil {
+				reset, err := a.store.RollSubscriptionPeriod(s.ID, start.Unix())
+				if err != nil {
 					a.log.Warn("reset usage", "sub", s.ID, "err", err)
 					continue
 				}
-				s.UsedUp, s.UsedDown, s.PeriodStart = 0, 0, start.Unix()
-				a.log.Info("subscription period reset", "sub", s.ID)
+				if reset {
+					a.log.Info("subscription period reset", "sub", s.ID)
+				}
+				// 无论是否由本次重置，快照都已过期，重新读取最新用量与状态。
+				fresh, err := a.store.GetSubscription(s.ID)
+				if err != nil {
+					continue
+				}
+				s = fresh
 			}
 		}
 		if st := State(s, now); st != s.State {

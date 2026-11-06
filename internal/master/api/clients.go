@@ -18,19 +18,29 @@ import (
 )
 
 // ruleSetCache 缓存主控中转的外部规则集原文（规则集库中的外部规则集、sing-box 的 geosite / geoip），
-// 过期后重新拉取，拉取失败时继续使用旧内容。
+// 过期后重新拉取，拉取失败时继续使用旧内容并退避一段时间再重试；同一 key 的并发拉取合并为一次。
 type ruleSetCache struct {
-	mu    sync.Mutex
-	items map[string]cachedRuleSet
+	mu     sync.Mutex
+	items  map[string]cachedRuleSet
+	flight flightGroup
 }
 
 type cachedRuleSet struct {
-	url  string
-	at   time.Time
-	body []byte
+	url     string
+	at      time.Time // 最近一次拉取成功的时间
+	retryAt time.Time // 拉取失败后的下次重试时间，此前直接使用旧内容
+	body    []byte
 }
 
 var ruleClient = &http.Client{Timeout: 30 * time.Second}
+
+const (
+	maxRuleSetSize = 20 << 20        // 规则集原文大小上限
+	ruleSetBackoff = 5 * time.Minute // 拉取失败且有旧内容时的重试间隔
+)
+
+// msgRuleSetUnavailable 为返回给订阅客户端的通用错误，详细原因只写日志。
+const msgRuleSetUnavailable = "规则集暂时不可用"
 
 // errNoPublicURL 表示输出引用了规则集库，但规则集需经主控转换，必须有公开访问地址。
 var errNoPublicURL = errors.New("使用规则集库中的规则集需要先在「设置 → 访问」中填写公开访问地址")
@@ -38,29 +48,88 @@ var errNoPublicURL = errors.New("使用规则集库中的规则集需要先在�
 // geoTagRe 为可中转的 SagerNet 规则集标签。
 var geoTagRe = regexp.MustCompile(`^geo(site|ip)-[a-z0-9@!_.-]+$`)
 
-// get 返回 key 对应的规则集原文：缓存未过期时直接返回，否则从 url 拉取；拉取失败且有同地址的旧内容时返回旧内容。
+// get 返回 key 对应的规则集原文：缓存未过期（或处于失败退避期）时直接返回，否则从 url 拉取；
+// 拉取失败且有同地址的旧内容时返回旧内容，并在 ruleSetBackoff 内不再重试。
 func (c *ruleSetCache) get(ctx context.Context, key, url string, ttl time.Duration) ([]byte, error) {
-	c.mu.Lock()
-	cached, ok := c.items[key]
-	c.mu.Unlock()
-	ok = ok && cached.url == url
-	if ok && time.Since(cached.at) < ttl {
-		return cached.body, nil
+	if body, ok := c.fresh(key, url, ttl); ok {
+		return body, nil
 	}
-	body, err := fetchRuleSet(ctx, url)
-	if err != nil {
-		if ok {
+	// 合并后的拉取不随单个请求取消，由 ruleClient 的超时兜底。
+	fctx := context.WithoutCancel(ctx)
+	return c.flight.do(key+"\n"+url, func() ([]byte, error) {
+		if body, ok := c.fresh(key, url, ttl); ok { // 等待期间已被其他请求刷新
+			return body, nil
+		}
+		body, err := fetchRuleSet(fctx, url)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.items == nil {
+			c.items = map[string]cachedRuleSet{}
+		}
+		if err != nil {
+			cached, ok := c.items[key]
+			if !ok || cached.url != url {
+				return nil, err
+			}
+			cached.retryAt = time.Now().Add(ruleSetBackoff)
+			c.items[key] = cached
 			return cached.body, nil
 		}
-		return nil, err
-	}
+		c.items[key] = cachedRuleSet{url: url, at: time.Now(), body: body}
+		return body, nil
+	})
+}
+
+// fresh 返回可直接使用的缓存内容：同地址且未过期，或处于失败退避期。
+func (c *ruleSetCache) fresh(key, url string, ttl time.Duration) ([]byte, bool) {
 	c.mu.Lock()
-	if c.items == nil {
-		c.items = map[string]cachedRuleSet{}
+	defer c.mu.Unlock()
+	cached, ok := c.items[key]
+	if !ok || cached.url != url {
+		return nil, false
 	}
-	c.items[key] = cachedRuleSet{url: url, at: time.Now(), body: body}
-	c.mu.Unlock()
-	return body, nil
+	now := time.Now()
+	if now.Sub(cached.at) < ttl || now.Before(cached.retryAt) {
+		return cached.body, true
+	}
+	return nil, false
+}
+
+// flightGroup 按 key 合并并发的相同调用（极简 singleflight）。
+type flightGroup struct {
+	mu    sync.Mutex
+	calls map[string]*flightCall
+}
+
+type flightCall struct {
+	done chan struct{}
+	val  []byte
+	err  error
+}
+
+// do 执行 fn 并返回结果；同一 key 已有调用进行中时等待其完成并共享结果。
+func (g *flightGroup) do(key string, fn func() ([]byte, error)) ([]byte, error) {
+	g.mu.Lock()
+	if c, ok := g.calls[key]; ok {
+		g.mu.Unlock()
+		<-c.done
+		return c.val, c.err
+	}
+	if g.calls == nil {
+		g.calls = map[string]*flightCall{}
+	}
+	c := &flightCall{done: make(chan struct{})}
+	g.calls[key] = c
+	g.mu.Unlock()
+
+	defer func() {
+		g.mu.Lock()
+		delete(g.calls, key)
+		g.mu.Unlock()
+		close(c.done)
+	}()
+	c.val, c.err = fn()
+	return c.val, c.err
 }
 
 // externalRuleSet 返回外部规则集的原文（经缓存）。
@@ -72,8 +141,8 @@ func (h *Handler) externalRuleSet(ctx context.Context, rs *store.RuleSet) ([]byt
 func (h *Handler) serveRelayedRuleSet(w http.ResponseWriter, r *http.Request, rs *store.RuleSet) {
 	body, err := h.externalRuleSet(r.Context(), rs)
 	if err != nil {
-		h.Log.Warn("relay rule set", "name", rs.Name, "err", err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		h.Log.Warn("relay rule set", "name", rs.Name, "err", redactURLs(err.Error()))
+		http.Error(w, msgRuleSetUnavailable, http.StatusBadGateway)
 		return
 	}
 	switch rs.Format {
@@ -95,8 +164,8 @@ func (h *Handler) serveGeoRuleSet(w http.ResponseWriter, r *http.Request, tag st
 	}
 	body, err := h.ruleSets.get(r.Context(), "geo:"+tag, routing.GeoRuleSetURL(tag), 24*time.Hour)
 	if err != nil {
-		h.Log.Warn("relay geo rule set", "tag", tag, "err", err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		h.Log.Warn("relay geo rule set", "tag", tag, "err", redactURLs(err.Error()))
+		http.Error(w, msgRuleSetUnavailable, http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
@@ -113,8 +182,8 @@ func (h *Handler) serveConvertedRuleSet(w http.ResponseWriter, r *http.Request, 
 			lines, err = routing.ParseMihomoRuleSet(body, rs.Format)
 		}
 		if err != nil {
-			h.Log.Warn("convert rule set", "name", rs.Name, "err", err)
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			h.Log.Warn("convert rule set", "name", rs.Name, "err", redactURLs(err.Error()))
+			http.Error(w, msgRuleSetUnavailable, http.StatusBadGateway)
 			return
 		}
 	}
@@ -129,6 +198,7 @@ func (h *Handler) serveConvertedRuleSet(w http.ResponseWriter, r *http.Request, 
 	w.Write(body)
 }
 
+// fetchRuleSet 拉取规则集原文，非 200 或超过 maxRuleSetSize 时返回错误。
 func fetchRuleSet(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -142,7 +212,14 @@ func fetchRuleSet(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("拉取规则集失败：HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRuleSetSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("读取规则集失败：%w", err)
+	}
+	if len(body) > maxRuleSetSize {
+		return nil, fmt.Errorf("规则集超过 %d MB", maxRuleSetSize>>20)
+	}
+	return body, nil
 }
 
 // ruleSetCheck 为外部规则集的检测结果。Suggest 为内容与所选格式不一致时建议使用的格式；

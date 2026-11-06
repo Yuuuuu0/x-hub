@@ -380,7 +380,7 @@ func (h *Handler) refreshExternal(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) fetchExternal(ctx context.Context, e *store.ExternalSource) {
 	res, err := external.Fetch(ctx, e.Content, e.UserAgent)
 	if err != nil {
-		h.Log.Warn("fetch external subscription", "source", e.ID, "err", err)
+		h.Log.Warn("fetch external subscription", "source", e.ID, "err", redactURLs(err.Error()))
 		h.Store.SetExternalFetch(e.ID, nil, "", err.Error())
 		return
 	}

@@ -159,9 +159,20 @@ func (s *Store) UpdateSubscriptionQuota(id, limitBytes, expireAt int64, resetDay
 		limitBytes, expireAt, resetDay, time.Now().Unix(), resetDay, id)
 }
 
-// ResetSubscriptionUsage 清零当前周期用量，并以 start 作为新周期起点。
+// ResetSubscriptionUsage 清零当前周期用量，并以 start 作为新周期起点（管理员手动重置，无条件执行）。
 func (s *Store) ResetSubscriptionUsage(id, start int64) error {
 	return s.execOne("UPDATE subscriptions SET used_up = 0, used_down = 0, period_start_at = ? WHERE id = ?", start, id)
+}
+
+// RollSubscriptionPeriod 仅当当前周期起点早于 start 时清零用量并把周期起点推进到 start，
+// 返回是否实际重置。条件更新保证并发核算时同一周期只重置一次，不会清掉新周期已入库的流量。
+func (s *Store) RollSubscriptionPeriod(id, start int64) (bool, error) {
+	res, err := s.db.Exec("UPDATE subscriptions SET used_up = 0, used_down = 0, period_start_at = ? WHERE id = ? AND period_start_at < ?", start, id, start)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // SetSubscriptionState 更新订阅状态。

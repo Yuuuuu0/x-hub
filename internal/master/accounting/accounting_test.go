@@ -1,9 +1,14 @@
 package accounting
 
 import (
+	"log/slog"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Yuuuuu0/x-hub/internal/master/settings"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 )
 
@@ -39,5 +44,54 @@ func TestState(t *testing.T) {
 	s.ExpireAt, s.LimitBytes = now.Add(time.Hour).Unix(), 0
 	if State(s, now) != store.SubActive {
 		t.Fatal("unlimited and not expired should be active")
+	}
+}
+
+type countSyncer struct{ n atomic.Int32 }
+
+func (c *countSyncer) TriggerAll() { c.n.Add(1) }
+
+// TestEvaluateConcurrentReset 并发核算时周期只重置一次，重置后入库的流量不会被后续核算清掉。
+func TestEvaluateConcurrentReset(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	cfg, _, err := settings.Load(st, func() string { return "panel1234" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := New(st, cfg, &countSyncer{}, slog.New(slog.DiscardHandler))
+	nodeID, _ := st.CreateNode("n", "", nil)
+	subID, _ := st.CreateSubscription(&store.Subscription{Name: "s", Token: "t", Secret: "x", UUID: "u", Enabled: true, AllInbounds: true})
+	if err := st.UpdateSubscriptionQuota(subID, 1000, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	hour := time.Now().Truncate(time.Hour).Unix()
+	st.ResetSubscriptionUsage(subID, hour-40*86400)
+	st.IngestTraffic(nodeID, []store.TrafficBatch{{Seq: 1, Hour: hour, Rows: []store.TrafficRow{{SubID: subID, InboundID: 1, Up: 2000}}}})
+	a.Evaluate(subID)
+	if s, _ := st.GetSubscription(subID); s.State != store.SubActive || s.UsedUp != 0 {
+		t.Fatalf("after reset: state=%s used=%d", s.State, s.UsedUp)
+	}
+
+	// 周期内新流量超额后，并发核算（含全量核算）不得再次清零，状态应为超额。
+	st.IngestTraffic(nodeID, []store.TrafficBatch{{Seq: 2, Hour: hour, Rows: []store.TrafficRow{{SubID: subID, InboundID: 1, Up: 1500}}}})
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				a.Evaluate()
+			} else {
+				a.Evaluate(subID)
+			}
+		}()
+	}
+	wg.Wait()
+	if s, _ := st.GetSubscription(subID); s.UsedUp != 1500 || s.State != store.SubExceeded {
+		t.Fatalf("after concurrent evaluate: state=%s used=%d", s.State, s.UsedUp)
 	}
 }

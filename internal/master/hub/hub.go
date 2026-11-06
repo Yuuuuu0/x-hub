@@ -105,7 +105,8 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, nodeID int64, ip str
 	}
 	defer c.close()
 
-	if err := c.handshake(); err != nil {
+	hello, err := c.handshake()
+	if err != nil {
 		h.log.Warn("agent handshake failed", "node", nodeID, "err", err)
 		ws.Close(websocket.StatusPolicyViolation, "handshake failed")
 		return
@@ -113,26 +114,31 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, nodeID int64, ip str
 	h.register(c)
 	defer h.unregister(c)
 	go c.writeLoop()
+	// 注册完成后再触发回调，确保回调中的 Request / State 能找到本连接。
+	if h.hooks.OnHello != nil {
+		go h.hooks.OnHello(nodeID, hello)
+	}
 	c.readLoop()
 }
 
-func (c *conn) handshake() error {
+// handshake 读取被控端的 hello 并回复 welcome，返回 hello 内容供注册后回调使用。
+func (c *conn) handshake() (protocol.Hello, error) {
+	var hello protocol.Hello
 	ctx, cancel := context.WithTimeout(c.ctx, helloTimeout)
 	defer cancel()
 	_, data, err := c.ws.Read(ctx)
 	if err != nil {
-		return err
+		return hello, err
 	}
 	var env protocol.Envelope
 	if err := json.Unmarshal(data, &env); err != nil || env.T != protocol.TypeHello {
-		return fmt.Errorf("expect hello")
+		return hello, fmt.Errorf("expect hello")
 	}
-	var hello protocol.Hello
 	if err := json.Unmarshal(env.D, &hello); err != nil {
-		return err
+		return hello, err
 	}
 	if err := c.hub.store.UpdateNodeRuntime(c.nodeID, hello.AgentVersion, hello.Xray.Version, hello.Caps, hello.Host, c.state.IP); err != nil {
-		return err
+		return hello, err
 	}
 	c.state.Xray, c.state.Caps = hello.Xray, hello.Caps
 	c.xrayVer, c.caps = hello.Xray.Version, hello.Caps
@@ -145,13 +151,10 @@ func (c *conn) handshake() error {
 	wctx, wcancel := context.WithTimeout(c.ctx, writeTimeout)
 	defer wcancel()
 	if err := c.ws.Write(wctx, websocket.MessageText, msg); err != nil {
-		return err
+		return hello, err
 	}
 	c.hub.log.Info("agent connected", "node", c.nodeID, "ip", c.state.IP, "agent", hello.AgentVersion, "xray", hello.Xray.Version)
-	if c.hub.hooks.OnHello != nil {
-		go c.hub.hooks.OnHello(c.nodeID, hello)
-	}
-	return nil
+	return hello, nil
 }
 
 func (c *conn) readLoop() {
@@ -264,14 +267,15 @@ func (c *conn) close() {
 	c.pmu.Unlock()
 }
 
+// register 登记新连接；同一服务器已有旧连接时立即断开旧连接（不等待关闭握手，避免半开连接阻塞）。
 func (h *Hub) register(c *conn) {
 	h.mu.Lock()
 	old := h.conns[c.nodeID]
 	h.conns[c.nodeID] = c
 	h.mu.Unlock()
 	if old != nil {
-		old.ws.Close(websocket.StatusPolicyViolation, "replaced by new connection")
 		old.cancel()
+		old.ws.CloseNow()
 	}
 }
 
@@ -394,10 +398,10 @@ func (h *Hub) OnlineBySub() map[int64][]string {
 	return out
 }
 
-// Kick 断开服务器连接，用于删除服务器后。
+// Kick 断开服务器连接，用于删除服务器后。直接关闭底层连接，不等待关闭握手，避免阻塞调用方。
 func (h *Hub) Kick(nodeID int64) {
 	if c := h.get(nodeID); c != nil {
-		c.ws.Close(websocket.StatusPolicyViolation, "node removed")
 		c.cancel()
+		c.ws.CloseNow()
 	}
 }

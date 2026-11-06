@@ -60,10 +60,11 @@ func (h *Handler) getSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// login 校验用户名密码并签发会话 Cookie，按来源 IP 限制失败次数。
+// login 校验用户名密码并签发会话 Cookie，按来源 IP 限制尝试次数。
+// 校验前原子预占一次尝试（并发请求无法绕过上限），成功后清零，非失败的中途返回归还预占。
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	ip := h.clientIP(r)
-	if !h.limiter.Allowed(ip) {
+	if !h.limiter.Acquire(ip) {
 		writeError(w, http.StatusTooManyRequests, "登录失败次数过多，请 15 分钟后再试")
 		return
 	}
@@ -73,23 +74,23 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		Code     string `json:"code"`
 	}
 	if err := readJSON(r, &req); err != nil {
+		h.limiter.Release(ip)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	admin, err := h.Store.AdminByUsername(req.Username)
 	if err != nil || !auth.VerifyPassword(req.Password, admin.PasswordHash) {
-		h.limiter.Fail(ip)
 		h.Log.Warn("login failed", "ip", ip, "username", req.Username)
 		writeError(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
 	if admin.TOTPSecret != "" {
 		if req.Code == "" {
+			h.limiter.Release(ip)
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "请输入两步验证码", "needTotp": true})
 			return
 		}
 		if !auth.VerifyTOTP(admin.TOTPSecret, req.Code, time.Now()) {
-			h.limiter.Fail(ip)
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "两步验证码错误", "needTotp": true})
 			return
 		}
@@ -106,6 +107,11 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, Secure: h.isHTTPS(r), SameSite: http.SameSiteLaxMode,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"username": admin.Username})
+}
+
+// PruneLoginLimiter 清理登录限流器中已过期的记录，由主控的周期清理任务调用。
+func (h *Handler) PruneLoginLimiter() {
+	h.limiter.Prune()
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {

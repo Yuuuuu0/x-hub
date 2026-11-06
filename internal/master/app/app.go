@@ -3,7 +3,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -100,7 +102,7 @@ func Run(opts Options) error {
 	h.Syncer.TriggerAll() // 预先编译各服务器期望配置，用于同步状态展示
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go cleanupLoop(ctx, st, log)
+	go cleanupLoop(ctx, st, h, log)
 	go h.Accounting.Run(ctx)
 	go h.RunExternalRefresh(ctx)
 	<-ctx.Done()
@@ -154,7 +156,8 @@ func printBanner(a settings.Access, password string, container bool) {
 	fmt.Println("────────────────────────────────────────────")
 }
 
-func cleanupLoop(ctx context.Context, st *store.Store, log *slog.Logger) {
+// cleanupLoop 每小时清理过期会话与登录限流记录，直到 ctx 结束。
+func cleanupLoop(ctx context.Context, st *store.Store, h *api.Handler, log *slog.Logger) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
@@ -165,6 +168,7 @@ func cleanupLoop(ctx context.Context, st *store.Store, log *slog.Logger) {
 			if err := st.DeleteExpiredSessions(); err != nil {
 				log.Warn("cleanup sessions", "err", err)
 			}
+			h.PruneLoginLimiter()
 		}
 	}
 }
@@ -271,39 +275,69 @@ func AdminReset(dataDir string) error {
 	return nil
 }
 
-// Restore 用备份文件替换当前数据库，原数据库保留为 .bak 副本。需在主控停止时执行。
+// Restore 用备份文件替换当前数据库，原数据库（连同 -wal/-shm）保留为 .bak 副本。需在主控停止时执行。
+// 备份先复制到数据目录下的临时文件再校验，避免对用户提供的原文件就地执行迁移。
 func Restore(dataDir, file string) error {
-	probe, err := store.Open(file)
-	if err != nil {
-		return fmt.Errorf("备份文件无效：%w", err)
-	}
-	_, err = probe.FirstAdmin()
-	probe.Close()
-	if err != nil {
-		return fmt.Errorf("备份文件无效：%w", err)
-	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
 	db := filepath.Join(dataDir, "xhub.db")
-	if _, err := os.Stat(db); err == nil {
-		bak := db + ".bak-" + time.Now().Format("20060102-150405")
-		if err := os.Rename(db, bak); err != nil {
-			return err
-		}
-		fmt.Println("原数据库已保留为", bak)
-	}
-	os.Remove(db + "-wal")
-	os.Remove(db + "-shm")
+	tmp := db + ".restore"
+	removeDB(tmp)
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(db, data, 0o600); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := probeBackup(tmp); err != nil {
+		removeDB(tmp)
+		return fmt.Errorf("备份文件无效：%w", err)
+	}
+	if _, err := os.Stat(db); err == nil {
+		bak := db + ".bak-" + time.Now().Format("20060102-150405")
+		if err := moveDB(db, bak); err != nil {
+			return err
+		}
+		fmt.Println("原数据库已保留为", bak)
+	}
+	if err := moveDB(tmp, db); err != nil {
 		return err
 	}
 	fmt.Println("恢复完成，启动主控后生效")
 	return nil
+}
+
+// probeBackup 打开数据库副本并确认存在管理员，用于校验备份有效性。
+func probeBackup(path string) error {
+	probe, err := store.Open(path)
+	if err != nil {
+		return err
+	}
+	_, err = probe.FirstAdmin()
+	probe.Close()
+	return err
+}
+
+// dbFiles 为 SQLite 主库及其 WAL 模式下的附属文件后缀。
+var dbFiles = []string{"", "-wal", "-shm"}
+
+// moveDB 把主库与 -wal/-shm 一并改名，保证未合并到主库的 WAL 数据随之保留。
+func moveDB(from, to string) error {
+	for _, s := range dbFiles {
+		if err := os.Rename(from+s, to+s); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeDB 删除主库及其附属文件，用于清理恢复过程中的临时副本。
+func removeDB(path string) {
+	for _, s := range dbFiles {
+		os.Remove(path + s)
+	}
 }
 
 func orDash(s string) string {

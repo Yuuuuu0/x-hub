@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,5 +72,48 @@ func TestBackup(t *testing.T) {
 	h.ServeHTTP(out, req)
 	if out.Code != 200 || !bytes.HasPrefix(out.Body.Bytes(), []byte("SQLite format 3")) {
 		t.Fatalf("backup: %d %q", out.Code, out.Body.String()[:min(40, out.Body.Len())])
+	}
+}
+
+// TestLoginConcurrentLockout 并发错误登录不能绕过 5 次上限，锁定后正确密码也被拒绝。
+func TestLoginConcurrentLockout(t *testing.T) {
+	h := newTestHandler(t)
+	h.Store.CreateAdmin("admin", auth.HashPassword("pass1234"))
+	var unauthorized, limited atomic.Int32
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			switch rec, _ := postLogin(h, map[string]string{"username": "admin", "password": "wrong"}); rec.Code {
+			case http.StatusUnauthorized:
+				unauthorized.Add(1)
+			case http.StatusTooManyRequests:
+				limited.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if unauthorized.Load() != 5 || limited.Load() != 15 {
+		t.Fatalf("401=%d 429=%d, want 5/15", unauthorized.Load(), limited.Load())
+	}
+	if rec, _ := postLogin(h, map[string]string{"username": "admin", "password": "pass1234"}); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("locked ip logged in: %d", rec.Code)
+	}
+}
+
+// TestLoginReleaseOnBadRequest 请求格式错误不计入失败次数。
+func TestLoginReleaseOnBadRequest(t *testing.T) {
+	h := newTestHandler(t)
+	h.Store.CreateAdmin("admin", auth.HashPassword("pass1234"))
+	for range 6 {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/panel1234/api/login", strings.NewReader("{bad")))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("bad request: %d", rec.Code)
+		}
+	}
+	if rec, _ := postLogin(h, map[string]string{"username": "admin", "password": "pass1234"}); rec.Code != http.StatusOK {
+		t.Fatalf("login after bad requests: %d", rec.Code)
 	}
 }
