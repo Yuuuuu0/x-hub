@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Yuuuuu0/x-hub/internal/agent/fsutil"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 )
 
@@ -24,6 +25,7 @@ const (
 	logLines     = 1000
 	stopTimeout  = 5 * time.Second
 	stableUptime = 30 * time.Second // 运行超过该时长的退出不计入崩溃退避
+	startCheck   = 3 * time.Second  // 安装或应用配置后观察该时长内未退出视为启动成功
 	maxBackoff   = time.Minute
 )
 
@@ -67,8 +69,8 @@ func New(dir string, log *slog.Logger) (*Manager, error) {
 	if err := os.MkdirAll(m.binDir(), 0o750); err != nil {
 		return nil, err
 	}
-	if b, err := os.ReadFile(m.statePath()); err == nil {
-		json.Unmarshal(b, &m.st)
+	if err := m.loadState(); err != nil {
+		return nil, err
 	}
 	if m.st.APIPort == 0 {
 		port, err := freePort()
@@ -208,9 +210,26 @@ func (m *Manager) setEnabled(v bool) error {
 	return m.saveState()
 }
 
+// loadState 读取持久化的 Xray 状态；文件不存在时保持零值由调用方初始化，读取或解析失败时返回错误，
+// 避免静默重置期望运行状态与 API 端口。
+func (m *Manager) loadState() error {
+	b, err := os.ReadFile(m.statePath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("读取 Xray 状态文件失败：%w", err)
+	}
+	if err := json.Unmarshal(b, &m.st); err != nil {
+		return fmt.Errorf("Xray 状态文件 %s 已损坏，请检查或删除后重启：%w", m.statePath(), err)
+	}
+	return nil
+}
+
+// saveState 原子写入 Xray 状态文件，调用方需持有 mu 或处于初始化阶段。
 func (m *Manager) saveState() error {
 	b, _ := json.Marshal(m.st)
-	return os.WriteFile(m.statePath(), b, 0o600)
+	return fsutil.WriteFile(m.statePath(), b, 0o600)
 }
 
 // startProc 校验配置并启动 Xray 子进程，调用方需持有 ops。
@@ -307,7 +326,7 @@ func (m *Manager) ensureConfig() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.configPath(), b, 0o600)
+	return fsutil.WriteFile(m.configPath(), b, 0o600)
 }
 
 // detectVersion 执行 xray version 解析版本号，未安装或无法执行时返回空。

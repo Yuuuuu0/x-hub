@@ -14,6 +14,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -30,14 +31,16 @@ import (
 )
 
 const (
-	heartbeatEvery = 15 * time.Second
-	trafficEvery   = 30 * time.Second
-	maxBatches     = 200 // 单条上报消息的批次上限
-	pingEvery      = 30 * time.Second
-	dialTimeout    = 20 * time.Second
-	writeTimeout   = 10 * time.Second
-	maxBackoff     = time.Minute
-	unauthBackoff  = 5 * time.Minute
+	heartbeatEvery  = 15 * time.Second
+	trafficEvery    = 30 * time.Second
+	maxBatches      = 200     // 单条上报消息的批次上限
+	maxTrafficBytes = 4 << 20 // 单条上报消息的序列化大小上限，低于主控 8MB 读取上限并留足余量
+	pingEvery       = 30 * time.Second
+	dialTimeout     = 20 * time.Second
+	writeTimeout    = 10 * time.Second
+	maxBackoff      = time.Minute
+	unauthBackoff   = 5 * time.Minute
+	stableSession   = 30 * time.Second // 会话存活超过该时长才重置重连退避，避免握手后立即断开时热循环重连
 )
 
 var errUnauthorized = errors.New("主控拒绝了节点凭据，请在面板重新生成安装命令并重装")
@@ -50,6 +53,8 @@ type Client struct {
 	ledger *ledger.Ledger
 	log    *slog.Logger
 	host   protocol.HostInfo
+	// applyMu 串行化配置应用。指令在独立 goroutine 中执行且不随断线取消，重连后主控可能重发，需保持逐个按序应用。
+	applyMu sync.Mutex
 }
 
 // New 创建客户端。
@@ -57,35 +62,44 @@ func New(cfg *config.Config, xm *xray.Manager, cm *certs.Manager, l *ledger.Ledg
 	return &Client{cfg: cfg, xray: xm, certs: cm, ledger: l, log: log, host: metrics.HostInfo()}
 }
 
-// Run 依次尝试候选地址连接主控，直到 ctx 结束。
+// Run 依次尝试候选地址连接主控，直到 ctx 结束。ctx 同时作为耗时指令（安装 Xray、申请证书等）的上下文，
+// 使其不随单次连接断开而取消，只在进程退出时取消。
 func (c *Client) Run(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		var lastErr error
 		connected := false
+		var alive time.Duration
 		for i, ep := range c.cfg.EndpointList() {
+			start := time.Now()
 			ok, err := c.session(ctx, ep, i)
 			if ok {
-				connected = true
+				connected, alive = true, time.Since(start)
 				break
 			}
 			lastErr = err
 			c.log.Warn("connect master failed", "url", ep.URL, "err", err)
 		}
-		wait := backoff
-		switch {
-		case connected:
-			backoff, wait = time.Second, time.Second
-		case errors.Is(lastErr, errUnauthorized):
-			wait = unauthBackoff
-		default:
-			backoff = min(backoff*2, maxBackoff)
-		}
+		var wait time.Duration
+		wait, backoff = nextBackoff(backoff, connected, alive, lastErr)
 		wait += time.Duration(rand.Int64N(int64(wait/2) + 1))
 		select {
 		case <-ctx.Done():
 		case <-time.After(wait):
 		}
+	}
+}
+
+// nextBackoff 根据本轮连接结果计算等待时长与新的退避值（抖动由调用方叠加）。
+// 会话存活超过 stableSession 才重置退避；握手成功但很快断开与连接失败一样按指数退避；凭据被拒时固定长等待。
+func nextBackoff(backoff time.Duration, connected bool, alive time.Duration, lastErr error) (wait, next time.Duration) {
+	switch {
+	case connected && alive >= stableSession:
+		return time.Second, time.Second
+	case !connected && errors.Is(lastErr, errUnauthorized):
+		return unauthBackoff, backoff
+	default:
+		return backoff, min(backoff*2, maxBackoff)
 	}
 }
 
@@ -130,7 +144,7 @@ func (c *Client) session(ctx context.Context, ep protocol.Endpoint, idx int) (co
 	sctx, scancel := context.WithCancel(ctx)
 	defer scancel()
 	go c.heartbeatLoop(sctx, scancel, ws)
-	err = c.readLoop(sctx, ws)
+	err = c.readLoop(sctx, ctx, ws)
 	c.log.Warn("disconnected from master", "err", err)
 	return true, nil
 }
@@ -176,7 +190,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, cancel context.CancelFunc, w
 		s.Online = c.xray.OnlineIPs()
 		return c.write(ctx, ws, protocol.TypeHeartbeat, "", s) == nil
 	}
-	// sendTraffic 上报全部待确认批次，未确认的会在下个周期重发，主控按序号去重。
+	// sendTraffic 上报待确认批次中不超过消息大小上限的前一段，未确认的会在下个周期重发，主控按序号去重。
 	sendTraffic := func() bool {
 		batches, err := c.ledger.Seal()
 		if err != nil {
@@ -186,9 +200,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, cancel context.CancelFunc, w
 		if len(batches) == 0 {
 			return true
 		}
-		if len(batches) > maxBatches {
-			batches = batches[:maxBatches]
-		}
+		batches = firstChunk(batches, maxTrafficBytes, maxBatches)
 		return c.write(ctx, ws, protocol.TypeTraffic, "", protocol.Traffic{Batches: batches}) == nil
 	}
 	// 连接建立后立即补报断线期间积压的流量，不等第一个上报周期。
@@ -227,9 +239,29 @@ func (c *Client) heartbeatLoop(ctx context.Context, cancel context.CancelFunc, w
 	}
 }
 
-func (c *Client) readLoop(ctx context.Context, ws *websocket.Conn) error {
+// firstChunk 返回 batches 中序列化后总大小不超过 maxBytes、条数不超过 maxCount 的最长前缀；
+// 首个批次单独超限时仍单独返回它（账本封存时已按大小拆分，正常不会出现），保证每个周期都有进展。
+func firstChunk(batches []protocol.TrafficBatch, maxBytes, maxCount int) []protocol.TrafficBatch {
+	const envelopeOverhead = 256 // 消息外层 {"t":"traffic","d":{"batches":[...]}} 的保守估算
+	size := envelopeOverhead
+	for i, b := range batches {
+		raw, err := json.Marshal(b)
+		if err != nil {
+			return batches[:max(i, 1)]
+		}
+		size += len(raw) + 1 // 逗号分隔
+		if i > 0 && (size > maxBytes || i >= maxCount) {
+			return batches[:i]
+		}
+	}
+	return batches
+}
+
+// readLoop 读取主控消息直到连接断开。sctx 为本次会话上下文，用于回复；root 为进程级上下文，
+// 耗时指令在独立 goroutine 中以 root 执行，避免阻塞读循环导致心跳超时，也不因连接断开而中止，回复失败可接受。
+func (c *Client) readLoop(sctx, root context.Context, ws *websocket.Conn) error {
 	for {
-		_, data, err := ws.Read(ctx)
+		_, data, err := ws.Read(sctx)
 		if err != nil {
 			return err
 		}
@@ -253,18 +285,18 @@ func (c *Client) readLoop(ctx context.Context, ws *websocket.Conn) error {
 				}
 			}
 		case protocol.TypeXray:
-			go c.reply(ctx, ws, env.ID, c.handleXray(ctx, env.D))
+			go func() { c.reply(sctx, ws, env.ID, c.handleXray(root, env.D)) }()
 		case protocol.TypeApply:
-			go c.reply(ctx, ws, env.ID, c.handleApply(ctx, env.D))
+			go func() { c.reply(sctx, ws, env.ID, c.handleApply(root, env.D)) }()
 		case protocol.TypeProbe:
-			go c.reply(ctx, ws, env.ID, c.handleProbe(ctx, env.D))
+			go func() { c.reply(sctx, ws, env.ID, c.handleProbe(sctx, env.D)) }()
 		case protocol.TypeLogs:
 			var req protocol.LogsRequest
 			json.Unmarshal(env.D, &req)
-			c.reply(ctx, ws, env.ID, okResult(protocol.LogsResponse{Lines: c.xray.Logs(req.Lines)}))
+			c.reply(sctx, ws, env.ID, okResult(protocol.LogsResponse{Lines: c.xray.Logs(req.Lines)}))
 		default:
 			if env.ID != "" {
-				c.reply(ctx, ws, env.ID, protocol.Result{Error: "被控端不支持该指令：" + env.T})
+				c.reply(sctx, ws, env.ID, protocol.Result{Error: "被控端不支持该指令：" + env.T})
 			}
 		}
 	}
@@ -303,6 +335,8 @@ func (c *Client) handleApply(ctx context.Context, raw json.RawMessage) protocol.
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return protocol.Result{Error: err.Error()}
 	}
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
 	cfg := a.Config
 	var certErr error
 	var dropped []string

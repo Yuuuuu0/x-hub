@@ -55,7 +55,7 @@ func (m *Manager) Install(ctx context.Context, tag string, fetch Fetcher) error 
 	}
 	err := m.startProc()
 	if err == nil {
-		err = m.waitStable(3 * time.Second)
+		err = m.waitStable(startCheck)
 	}
 	if err != nil {
 		m.log.Warn("xray install failed, rolling back", "version", tag, "err", err)

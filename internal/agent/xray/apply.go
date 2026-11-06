@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/Yuuuuu0/x-hub/internal/agent/fsutil"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 )
 
@@ -18,7 +19,9 @@ func (m *Manager) Applied() (int64, string) {
 	return m.st.AppliedRev, m.st.AppliedHash
 }
 
-// Apply 应用主控下发的配置：注入自管段、校验、原子替换，并在 Xray 期望运行时重启生效。
+// Apply 应用主控下发的配置：注入自管段、校验、原子替换，并在 Xray 期望运行时在线增删用户或重启生效。
+// 重启后在 startCheck 内退出（如端口被占用）视为失败：还原上一份配置并重启，返回错误且不记录版本；
+// 新配置确认生效后才记录已应用版本并保存。
 // 版本号低于已应用版本的配置视为过期并忽略。commit 为 false 时（配置被部分裁剪）不记录为已应用版本。
 func (m *Manager) Apply(rev int64, hash string, cfg []byte, commit bool) error {
 	m.ops.Lock()
@@ -42,43 +45,78 @@ func (m *Manager) Apply(rev int64, hash string, cfg []byte, commit bool) error {
 			return fmt.Errorf("配置校验失败：%s", lastLine(string(out)))
 		}
 	}
-	prev, _ := os.ReadFile(m.masterConfigPath())
-	if err := os.Rename(tmp, m.configPath()); err != nil {
+	prevMaster, _ := os.ReadFile(m.masterConfigPath())
+	prevFull, prevErr := os.ReadFile(m.configPath())
+	if err := fsutil.WriteFile(m.configPath(), full, 0o600); err != nil {
 		return err
 	}
-	if err := os.WriteFile(m.masterConfigPath(), cfg, 0o600); err != nil {
+	if err := m.activate(prevMaster, cfg); err != nil {
+		m.log.Warn("apply config failed, restoring previous config", "rev", rev, "err", err)
+		m.rollback(prevFull, prevErr == nil)
+		return fmt.Errorf("新配置启动失败，已还原上一份配置：%w", err)
+	}
+	if err := fsutil.WriteFile(m.masterConfigPath(), cfg, 0o600); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	if commit {
 		m.st.AppliedRev, m.st.AppliedHash = rev, hash
 	}
-	enabled := m.st.Enabled
 	err = m.saveState()
 	m.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	m.notify()
+	return nil
+}
+
+// activate 让已写入本地的新配置生效，调用方需持有 ops。Xray 未期望运行或未安装时无需操作；
+// 只有用户变化时在线增删，不中断其他连接，失败则回退为重启；重启后等待进程稳定，期间退出返回错误。
+// prevMaster 为上一次应用的主控原始配置，cfg 为本次主控原始配置。
+func (m *Manager) activate(prevMaster, cfg []byte) error {
+	m.mu.Lock()
+	enabled := m.st.Enabled
+	m.mu.Unlock()
 	if !enabled || !m.Status().Installed {
 		return nil
 	}
-	// 只有用户变化时在线增删，不中断其他连接；失败则回退为重启。
-	if m.running() && prev != nil {
-		if ops, ok := usersOnlyDiff(prev, cfg); ok {
+	if m.running() && prevMaster != nil {
+		if ops, ok := usersOnlyDiff(prevMaster, cfg); ok {
 			if len(ops) == 0 {
 				return nil
 			}
-			if err := m.alterUsers(ops); err == nil {
+			err := m.alterUsers(ops)
+			if err == nil {
 				m.log.Info("xray users updated via api", "ops", len(ops))
 				return nil
-			} else {
-				m.log.Warn("alter users failed, restarting xray", "err", err)
 			}
+			m.log.Warn("alter users failed, restarting xray", "err", err)
 		}
 	}
 	m.stopProc()
-	return m.startProc()
+	if err := m.startProc(); err != nil {
+		return err
+	}
+	return m.waitStable(startCheck)
+}
+
+// rollback 把 Xray 配置还原为 prev 并重启，调用方需持有 ops。had 为 false 表示此前没有配置文件，
+// 此时删除配置，由启动时 ensureConfig 写入基础配置。重启失败交由 Supervise 按退避重试。
+func (m *Manager) rollback(prev []byte, had bool) {
+	m.stopProc()
+	var err error
+	if had {
+		err = fsutil.WriteFile(m.configPath(), prev, 0o600)
+	} else {
+		err = os.Remove(m.configPath())
+	}
+	if err != nil {
+		m.log.Error("restore xray config", "err", err)
+	}
+	if err := m.startProc(); err != nil {
+		m.log.Warn("restart xray with previous config failed", "err", err)
+	}
 }
 
 // masterConfigPath 为最近一次应用的主控原始配置，用于判断下次变更是否只涉及用户。

@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -80,7 +81,17 @@ func run(cfgPath string) error {
 	if err != nil {
 		return err
 	}
-	led, err := ledger.Open(filepath.Join(cfg.DataDir, "ledger.json"))
+	ledgerPath := filepath.Join(cfg.DataDir, "ledger.json")
+	led, err := ledger.Open(ledgerPath)
+	if errors.Is(err, ledger.ErrCorrupt) {
+		// 账本损坏时留存原文件并用新账本启动，避免直接退出导致 systemd 无限重启。
+		bak, qerr := ledger.Quarantine(ledgerPath)
+		if qerr != nil {
+			return fmt.Errorf("留存损坏的流量账本失败：%w", qerr)
+		}
+		log.Warn("traffic ledger corrupted, moved aside and starting with a new one", "backup", bak, "err", err)
+		led, err = ledger.Open(ledgerPath)
+	}
 	if err != nil {
 		return fmt.Errorf("读取流量账本失败：%w", err)
 	}

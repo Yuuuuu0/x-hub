@@ -50,7 +50,7 @@ func (c *Collector) Collect() {
 	if err != nil {
 		c.log.Warn("query xray traffic", "err", err)
 	}
-	rx, tx := c.ledger.NICDelta(metrics.NetCounters())
+	rx, tx := c.ledger.NICDelta(metrics.NICCounters())
 	if len(users) == 0 && rx == 0 && tx == 0 {
 		return
 	}

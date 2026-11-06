@@ -26,6 +26,7 @@ import (
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 	"github.com/go-acme/lego/v4/registration"
 
+	"github.com/Yuuuuu0/x-hub/internal/agent/fsutil"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 )
 
@@ -101,10 +102,11 @@ func (m *Manager) Ensure(ctx context.Context, a protocol.ACME) error {
 		if err := os.MkdirAll(filepath.Dir(cert), 0o700); err != nil {
 			return err
 		}
-		if err := os.WriteFile(key, res.PrivateKey, 0o600); err != nil {
-			return err
-		}
-		if err := os.WriteFile(cert, res.Certificate, 0o600); err != nil {
+		// 先写好证书与私钥两个临时文件再依次替换，避免出现截断或不配对的证书对。
+		if err := fsutil.WriteFiles(
+			fsutil.File{Path: key, Data: res.PrivateKey, Perm: 0o600},
+			fsutil.File{Path: cert, Data: res.Certificate, Perm: 0o600},
+		); err != nil {
 			return err
 		}
 		m.log.Info("certificate obtained", "domain", d)
@@ -197,12 +199,13 @@ func (m *Manager) client(a protocol.ACME) (*lego.Client, error) {
 	return client, nil
 }
 
+// writeJSON 把 v 序列化后原子写入 path（权限 0600）。
 func writeJSON(path string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o600)
+	return fsutil.WriteFile(path, b, 0o600)
 }
 
 // DropMissing 从配置中移除证书文件尚不存在的 ACME 入站（证书路径相对数据目录），返回过滤后的配置与被移除的 tag。

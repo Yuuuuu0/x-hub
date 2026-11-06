@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/Yuuuuu0/x-hub/internal/agent/fsutil"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 )
 
@@ -52,14 +53,10 @@ func (c *Config) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	tmp := c.path + ".tmp"
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o750); err != nil {
 		return err
 	}
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, c.path)
+	return fsutil.WriteFile(c.path, b, 0o600)
 }
 
 // EndpointList 返回地址候选列表副本。

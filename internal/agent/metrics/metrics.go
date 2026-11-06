@@ -58,18 +58,27 @@ func Sample() protocol.Heartbeat {
 
 // NetCounters 返回物理网卡开机以来的累计收发字节数。
 func NetCounters() (rx, tx uint64) {
+	for _, v := range NICCounters() {
+		rx += v[0]
+		tx += v[1]
+	}
+	return rx, tx
+}
+
+// NICCounters 返回各物理网卡的累计收发字节数 [收, 发]，读取失败时返回 nil。
+func NICCounters() map[string][2]uint64 {
 	nics, err := net.IOCounters(true)
 	if err != nil {
-		return 0, 0
+		return nil
 	}
+	out := make(map[string][2]uint64, len(nics))
 	for _, n := range nics {
 		if isVirtual(n.Name) {
 			continue
 		}
-		rx += n.BytesRecv
-		tx += n.BytesSent
+		out[n.Name] = [2]uint64{n.BytesRecv, n.BytesSent}
 	}
-	return rx, tx
+	return out
 }
 
 func isVirtual(name string) bool {
