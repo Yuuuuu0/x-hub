@@ -73,7 +73,7 @@ function save() {
 </script>
 
 <template>
-  <a-drawer v-model:open="open" :title="group ? '编辑分组' : '新建分组'" :width="520" class="group-drawer">
+  <a-drawer v-model:open="open" :title="group ? '编辑分组' : '新建分组'" width="min(520px, 100vw)" class="group-drawer">
     <a-form layout="vertical">
       <a-form-item label="名称" required>
         <a-input v-model:value="form.name" :maxlength="64" placeholder="如：美国节点" />
@@ -170,6 +170,12 @@ function save() {
 .types :deep(.ant-radio-button-wrapper) {
   flex: 1;
   text-align: center;
+}
+@media (max-width: 640px) {
+  .types :deep(.ant-radio-button-wrapper) {
+    padding-inline: 4px;
+    white-space: nowrap;
+  }
 }
 .nodes {
   padding: 16px;

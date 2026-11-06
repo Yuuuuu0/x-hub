@@ -125,7 +125,7 @@ async function save() {
 </script>
 
 <template>
-  <a-drawer v-model:open="open" :title="item ? '编辑外部节点' : '添加外部节点'" :width="600">
+  <a-drawer v-model:open="open" :title="item ? '编辑外部节点' : '添加外部节点'" width="min(600px, 100vw)">
     <a-form layout="vertical">
       <a-form-item v-if="!item" label="来源">
         <a-radio-group v-model:value="form.kind" button-style="solid" class="split" @change="parsed = null">

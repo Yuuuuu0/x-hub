@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Modal, message } from 'ant-design-vue'
+import { message } from 'ant-design-vue'
 import { AlertTriangle, Link2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { api, type ExternalItem, type InboundItem, type ProfileItem, type Subscription } from '../lib/api'
+import { confirmAction } from '../lib/confirm'
 import { ago, bytes, percent } from '../lib/format'
 import ExternalFormDrawer from '../components/ExternalFormDrawer.vue'
 
@@ -114,18 +115,19 @@ async function refresh(it: ExternalItem) {
 }
 
 function remove(it: ExternalItem) {
-  Modal.confirm({
-    title: `删除「${it.source.name}」？`,
-    content: '订阅中的这些节点会在客户端下次更新时消失。',
-    okText: '删除',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `删除「${it.source.name}」？`,
+      content: '订阅中的这些节点会在客户端下次更新时消失。',
+      okText: '删除',
+      okType: 'danger',
+    },
+    async () => {
       await api.del(`external/${it.source.id}`)
       message.success('已删除')
       load()
     },
-  })
+  )
 }
 </script>
 

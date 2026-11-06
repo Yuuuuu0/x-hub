@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Modal, message } from 'ant-design-vue'
+import { message } from 'ant-design-vue'
 import { GripVertical, Pencil, Plus, QrCode, Trash2 } from 'lucide-vue-next'
 import { api, type InboundItem, type NodeItem } from '../lib/api'
+import { confirmAction } from '../lib/confirm'
 import { useDragSort } from '../lib/dragSort'
 import { usePolling } from '../lib/poll'
 import InboundFormDrawer from '../components/InboundFormDrawer.vue'
@@ -33,7 +34,7 @@ const current = ref<InboundItem | null>(null)
 const showForm = ref(false)
 const showShare = ref(false)
 
-const sort = useDragSort(inbounds, 'inbounds/order', load)
+const sort = useDragSort(inbounds, 'inbounds/order', () => refresh())
 
 async function load() {
   try {
@@ -50,7 +51,8 @@ async function load() {
   }
 }
 
-usePolling(load, () => POLL_MS)
+// 操作后统一用 refresh 刷新：与轮询串行执行，不会被跳过，也不会被操作前发出的轮询结果覆盖
+const { refresh } = usePolling(load, () => POLL_MS)
 
 const nodeOf = computed(() => new Map(nodes.value.map((n) => [n.id, n])))
 
@@ -78,7 +80,7 @@ async function toggle(i: InboundItem, enabled: boolean) {
   try {
     await api.put(`inbounds/${i.id}`, { ...i, enabled })
     i.enabled = enabled
-    load()
+    refresh()
   } catch (e: any) {
     message.error(e.message)
   } finally {
@@ -87,18 +89,19 @@ async function toggle(i: InboundItem, enabled: boolean) {
 }
 
 function remove(i: InboundItem) {
-  Modal.confirm({
-    title: `删除入站「${i.remark || `端口 ${i.port}`}」？`,
-    content: '该入站将从服务器配置中移除，使用它的客户端会立即断开。',
-    okText: '删除',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `删除入站「${i.remark || `端口 ${i.port}`}」？`,
+      content: '该入站将从服务器配置中移除，使用它的客户端会立即断开。',
+      okText: '删除',
+      okType: 'danger',
+    },
+    async () => {
       await api.del(`inbounds/${i.id}`)
       message.success('已删除')
-      load()
+      refresh()
     },
-  })
+  )
 }
 </script>
 
@@ -157,7 +160,7 @@ function remove(i: InboundItem) {
             <span v-else-if="column.key === 'node'" class="server">
               <span :class="['dot', { on: nodeOf.get(record.nodeId)?.runtime.online }]" />
               <span class="server-name">{{ record.nodeName }}</span>
-              <SyncChip v-if="nodeOf.get(record.nodeId) && nodeOf.get(record.nodeId)!.syncState !== 'synced'" :node="nodeOf.get(record.nodeId)!" @retried="load" />
+              <SyncChip v-if="nodeOf.get(record.nodeId) && nodeOf.get(record.nodeId)!.syncState !== 'synced'" :node="nodeOf.get(record.nodeId)!" @retried="refresh" />
             </span>
             <span v-else-if="column.key === 'port'" class="mono dim">{{ record.port }}</span>
             <span v-else-if="column.key === 'host'" class="mono muted sni dim">{{ hostOf(record) }}</span>
@@ -177,7 +180,7 @@ function remove(i: InboundItem) {
       </div>
     </template>
 
-    <InboundFormDrawer v-model:open="showForm" :inbound="current" :nodes="nodes" @saved="load" />
+    <InboundFormDrawer v-model:open="showForm" :inbound="current" :nodes="nodes" @saved="refresh" />
     <ShareModal v-model:open="showShare" :inbound="current" />
   </section>
 </template>

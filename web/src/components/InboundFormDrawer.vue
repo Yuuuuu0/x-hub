@@ -225,7 +225,7 @@ async function save() {
 </script>
 
 <template>
-  <a-drawer v-model:open="open" :title="editing ? '编辑入站' : '新建入站'" :width="640" class="inbound-drawer">
+  <a-drawer v-model:open="open" :title="editing ? '编辑入站' : '新建入站'" width="min(640px, 100vw)" class="inbound-drawer">
     <a-form layout="vertical" @submit.prevent="save">
       <section class="sec">
         <h4>基础</h4>

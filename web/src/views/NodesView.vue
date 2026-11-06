@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Modal, message } from 'ant-design-vue'
+import { message } from 'ant-design-vue'
 import { GripVertical, Layers, Plus } from 'lucide-vue-next'
 import { api, type CountryItem, type NodeItem } from '../lib/api'
+import { confirmAction } from '../lib/confirm'
 import { usePolling } from '../lib/poll'
 import { useDragSort } from '../lib/dragSort'
 import { bytesParts } from '../lib/format'
@@ -30,7 +31,7 @@ const showVersions = ref(false)
 const showLogs = ref(false)
 const showBatch = ref(false)
 
-const sort = useDragSort(nodes, 'nodes/order', load)
+const sort = useDragSort(nodes, 'nodes/order', () => refresh())
 
 async function load() {
   try {
@@ -45,7 +46,8 @@ async function load() {
   }
 }
 
-usePolling(load, () => (showInstall.value ? POLL_FAST_MS : POLL_MS))
+// 操作后统一用 refresh 刷新：与轮询串行执行，不会被跳过，也不会被操作前发出的轮询结果覆盖
+const { refresh } = usePolling(load, () => (showInstall.value ? POLL_FAST_MS : POLL_MS))
 
 /** 弹窗使用列表中的最新数据，以便实时显示接入状态。 */
 const live = computed(() => nodes.value.find((n) => n.id === current.value?.id) ?? current.value)
@@ -73,7 +75,7 @@ function open(n: NodeItem, which: 'install' | 'versions' | 'logs') {
 }
 
 function onSaved(n: NodeItem, created: boolean) {
-  load()
+  refresh()
   if (created) {
     current.value = n
     showInstall.value = true
@@ -93,23 +95,24 @@ async function xray(n: NodeItem, action: keyof typeof ACTION_TEXT) {
     message.error(e.message)
   } finally {
     busy.value[n.id] = false
-    load()
+    refresh()
   }
 }
 
 function remove(n: NodeItem) {
-  Modal.confirm({
-    title: `删除「${n.name}」？`,
-    content: '服务器记录将被删除，被控端将无法再连接主控。被控端程序需在 VPS 上手动卸载。',
-    okText: '删除',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `删除「${n.name}」？`,
+      content: '服务器记录将被删除，被控端将无法再连接主控。被控端程序需在 VPS 上手动卸载。',
+      okText: '删除',
+      okType: 'danger',
+    },
+    async () => {
       await api.del(`nodes/${n.id}`)
       message.success('已删除')
-      load()
+      refresh()
     },
-  })
+  )
 }
 </script>
 
@@ -178,7 +181,7 @@ function remove(n: NodeItem) {
         @logs="open(n, 'logs')"
         @remove="remove(n)"
         @xray="(a) => xray(n, a)"
-        @synced="load"
+        @synced="refresh"
       >
         <template #grip>
           <span v-bind="sort.gripProps(n.id)"><GripVertical :size="16" /></span>
@@ -188,9 +191,9 @@ function remove(n: NodeItem) {
 
     <NodeFormModal v-model:open="showForm" :node="current" :countries="countries" @saved="onSaved" />
     <InstallCommandModal v-model:open="showInstall" :node="live" />
-    <XrayInstallModal v-model:open="showVersions" :node="current" @done="load" />
+    <XrayInstallModal v-model:open="showVersions" :node="current" @done="refresh" />
     <LogsDrawer v-model:open="showLogs" :node="current" />
-    <BatchUpgradeModal v-model:open="showBatch" :nodes="nodes" @done="load" />
+    <BatchUpgradeModal v-model:open="showBatch" :nodes="nodes" @done="refresh" />
   </section>
 </template>
 

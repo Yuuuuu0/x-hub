@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { Modal, message } from 'ant-design-vue'
+import { message } from 'ant-design-vue'
 import { BarChart3, ChevronDown, KeyRound, Link2, MonitorSmartphone, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import { api, type InboundItem, type ProfileItem, type Subscription } from '../lib/api'
+import { confirmAction } from '../lib/confirm'
 import { datetime } from '../lib/format'
 import { usePolling } from '../lib/poll'
 import SubLinkModal from '../components/SubLinkModal.vue'
@@ -64,7 +65,8 @@ async function load() {
   }
 }
 
-usePolling(load, () => 10000, () => !showForm.value)
+// 操作后统一用 refresh 刷新：与轮询串行执行，不会被跳过，也不会被操作前发出的轮询结果覆盖
+const { refresh } = usePolling(load, () => 10000, () => !showForm.value)
 
 function openDetail(s: Subscription) {
   detailSub.value = s
@@ -115,7 +117,7 @@ async function save() {
     else await api.post('subscriptions', body)
     showForm.value = false
     message.success('已保存，正在同步到各服务器')
-    load()
+    refresh()
   } catch (e: any) {
     message.error(e.message)
   } finally {
@@ -142,48 +144,51 @@ function onReset(s: Subscription, key: string) {
 }
 
 function resetToken(s: Subscription) {
-  Modal.confirm({
-    title: `重置「${s.name}」的订阅链接？`,
-    content: '旧订阅链接立即失效，需要把新链接重新发给使用者；已导入的节点仍可继续使用。',
-    okText: '重置链接',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `重置「${s.name}」的订阅链接？`,
+      content: '旧订阅链接立即失效，需要把新链接重新发给使用者；已导入的节点仍可继续使用。',
+      okText: '重置链接',
+      okType: 'danger',
+    },
+    async () => {
       await api.post(`subscriptions/${s.id}/reset-token`)
       message.success('订阅链接已重置')
-      load()
+      refresh()
     },
-  })
+  )
 }
 
 function resetCredentials(s: Subscription) {
-  Modal.confirm({
-    title: `重置「${s.name}」的凭据？`,
-    content: '将生成新的 UUID，已导入旧配置的客户端会立即失效，需要重新导入。',
-    okText: '重置',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `重置「${s.name}」的凭据？`,
+      content: '将生成新的 UUID，已导入旧配置的客户端会立即失效，需要重新导入。',
+      okText: '重置',
+      okType: 'danger',
+    },
+    async () => {
       await api.post(`subscriptions/${s.id}/reset-credentials`)
       message.success('凭据已重置')
-      load()
+      refresh()
     },
-  })
+  )
 }
 
 function remove(s: Subscription) {
-  Modal.confirm({
-    title: `删除订阅「${s.name}」？`,
-    content: '该订阅的凭据会从所有服务器移除，使用它的客户端将无法连接。',
-    okText: '删除',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `删除订阅「${s.name}」？`,
+      content: '该订阅的凭据会从所有服务器移除，使用它的客户端将无法连接。',
+      okText: '删除',
+      okType: 'danger',
+    },
+    async () => {
       await api.del(`subscriptions/${s.id}`)
       message.success('已删除')
-      load()
+      refresh()
     },
-  })
+  )
 }
 </script>
 
@@ -283,7 +288,7 @@ function remove(s: Subscription) {
       </a-form>
     </a-modal>
     <SubLinkModal v-model:open="showLink" :sub="linkSub" />
-    <SubDetailDrawer v-model:open="showDetail" :sub="detailSub && (subs.find((x) => x.id === detailSub!.id) ?? detailSub)" @changed="load" />
+    <SubDetailDrawer v-model:open="showDetail" :sub="detailSub && (subs.find((x) => x.id === detailSub!.id) ?? detailSub)" @changed="refresh" />
   </section>
 </template>
 

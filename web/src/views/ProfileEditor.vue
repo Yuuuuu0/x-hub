@@ -85,9 +85,13 @@ async function save() {
   }
 }
 
+/** 预览请求序号：只采纳最新一次请求的响应，避免旧响应覆盖新结果。 */
+let previewReq = 0
+
 /** 以编辑器中的内容（含未保存的修改）渲染预览订阅的配置。 */
 async function runPreview() {
   if (!preview.subId) return
+  const req = ++previewReq
   preview.loading = true
   try {
     const r = await api.post<{ config: string; warnings: string[]; issues: string[]; nodes?: PreviewNode[] }>('profiles/preview', {
@@ -95,16 +99,18 @@ async function runPreview() {
       client: client.value,
       spec,
     })
+    if (req !== previewReq) return
     preview.config = r.config
     preview.warnings = r.warnings
     preview.issues = r.issues
     if (r.nodes) preview.nodes = r.nodes
   } catch (e: any) {
+    if (req !== previewReq) return
     preview.config = ''
     preview.warnings = []
     preview.issues = [e.message]
   } finally {
-    preview.loading = false
+    if (req === previewReq) preview.loading = false
   }
 }
 

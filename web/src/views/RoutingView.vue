@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { Modal, message } from 'ant-design-vue'
 import { Copy, CopyPlus, FileDown, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import { api, type ProfileItem, type RuleSetItem } from '../lib/api'
+import { confirmAction } from '../lib/confirm'
 import { copyText } from '../lib/clipboard'
 import { datetime } from '../lib/format'
 import RuleSetModal from '../components/RuleSetModal.vue'
@@ -98,17 +99,18 @@ async function duplicate(p: ProfileItem) {
 }
 
 function removeProfile(p: ProfileItem) {
-  Modal.confirm({
-    title: `删除方案「${p.name}」？`,
-    okText: '删除',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `删除方案「${p.name}」？`,
+      okText: '删除',
+      okType: 'danger',
+    },
+    async () => {
       await api.del(`profiles/${p.id}`)
       message.success('已删除')
       load()
     },
-  })
+  )
 }
 
 function editSet(rs: RuleSetItem | null) {
@@ -117,17 +119,18 @@ function editSet(rs: RuleSetItem | null) {
 }
 
 function removeSet(rs: RuleSetItem) {
-  Modal.confirm({
-    title: `删除规则集「${rs.name}」？`,
-    okText: '删除',
-    okType: 'danger',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `删除规则集「${rs.name}」？`,
+      okText: '删除',
+      okType: 'danger',
+    },
+    async () => {
       await api.del(`rulesets/${rs.id}`)
       message.success('已删除')
       load()
     },
-  })
+  )
 }
 
 async function copyURL(rs: RuleSetItem) {

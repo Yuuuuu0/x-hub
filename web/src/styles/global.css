@@ -140,3 +140,16 @@ article.sort-after {
     display: none;
   }
 }
+
+/* 窄屏抽屉：宽度由各抽屉的 min(Npx, 100vw) 限制为全屏，这里收紧内边距，桌面端不受影响。 */
+@media (max-width: 640px) {
+  .ant-drawer .ant-drawer-header {
+    padding: 14px 16px;
+  }
+  .ant-drawer .ant-drawer-body {
+    padding: 16px;
+  }
+  .ant-drawer .ant-drawer-footer {
+    padding: 10px 16px;
+  }
+}

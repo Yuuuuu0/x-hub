@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Modal, message } from 'ant-design-vue'
+import { message } from 'ant-design-vue'
 import { RotateCcw } from 'lucide-vue-next'
 import { api, type Subscription, type SubTraffic } from '../lib/api'
+import { confirmAction } from '../lib/confirm'
 import { bytes, datetime } from '../lib/format'
 import TrafficChart from './TrafficChart.vue'
 import UsageMeter from './UsageMeter.vue'
@@ -16,19 +17,29 @@ const days = ref(30)
 const data = ref<SubTraffic | null>(null)
 const loading = ref(false)
 
+/** 请求序号：只采纳最新一次请求的响应，切换订阅或天数后旧响应直接丢弃。 */
+let reqId = 0
+
 async function load() {
   if (!props.sub) return
+  const req = ++reqId
   loading.value = true
   try {
-    data.value = await api.get<SubTraffic>(`subscriptions/${props.sub.id}/traffic?days=${days.value}`)
+    const r = await api.get<SubTraffic>(`subscriptions/${props.sub.id}/traffic?days=${days.value}`)
+    if (req === reqId) data.value = r
   } catch (e: any) {
-    message.error(e.message)
+    if (req === reqId) message.error(e.message)
   } finally {
-    loading.value = false
+    if (req === reqId) loading.value = false
   }
 }
 
-watch(open, (v) => v && load())
+// 打开抽屉或切换订阅时先清空旧数据（显示加载态）再加载，避免短暂显示上一个订阅的流量。
+watch([open, () => props.sub?.id], ([v]) => {
+  if (!v) return
+  data.value = null
+  load()
+})
 watch(days, load)
 
 const periodText = computed(() => {
@@ -40,23 +51,24 @@ const periodText = computed(() => {
 function resetTraffic() {
   const s = props.sub
   if (!s) return
-  Modal.confirm({
-    title: `清零「${s.name}」的已用流量？`,
-    content: '当前周期用量归零并从现在开始新周期；因超额被停用的订阅会立即恢复。历史统计不受影响。',
-    okText: '清零',
-    cancelText: '取消',
-    async onOk() {
+  confirmAction(
+    {
+      title: `清零「${s.name}」的已用流量？`,
+      content: '当前周期用量归零并从现在开始新周期；因超额被停用的订阅会立即恢复。历史统计不受影响。',
+      okText: '清零',
+    },
+    async () => {
       await api.post(`subscriptions/${s.id}/reset-traffic`)
       message.success('已清零')
       emit('changed')
       load()
     },
-  })
+  )
 }
 </script>
 
 <template>
-  <a-drawer v-model:open="open" :title="`流量 · ${sub?.name ?? ''}`" :width="720">
+  <a-drawer v-model:open="open" :title="`流量 · ${sub?.name ?? ''}`" width="min(720px, 100vw)">
     <template v-if="sub">
       <section class="sec">
         <UsageMeter :sub="sub" large />
@@ -85,14 +97,15 @@ function resetTraffic() {
         <a-table
           size="small"
           :pagination="false"
+          :loading="loading && !data"
           :data-source="data?.byInbound ?? []"
           :row-key="(r: any) => `${r.nodeId}-${r.inboundId}`"
           :locale="{ emptyText: '本周期暂无流量' }"
           :columns="[
             { title: '入站', key: 'name' },
-            { title: '下行', dataIndex: 'down', align: 'right', customRender: ({ value }: any) => bytes(value) },
-            { title: '上行', dataIndex: 'up', align: 'right', customRender: ({ value }: any) => bytes(value) },
-            { title: '合计', key: 'total', align: 'right' },
+            { title: '下行', dataIndex: 'down', align: 'right', className: 'num', customRender: ({ value }: any) => bytes(value) },
+            { title: '上行', dataIndex: 'up', align: 'right', className: 'num', customRender: ({ value }: any) => bytes(value) },
+            { title: '合计', key: 'total', align: 'right', className: 'num' },
           ]"
         >
           <template #bodyCell="{ column, record }">
@@ -166,9 +179,27 @@ function resetTraffic() {
   margin-right: 5px;
   vertical-align: -2px;
 }
+/* 流量数值不拆行，窄屏时由入站名称列换行让出空间 */
+.sec :deep(td.num),
+.sec :deep(th.num) {
+  white-space: nowrap;
+}
 @media (max-width: 640px) {
+  .sec {
+    padding: 14px;
+  }
   .facts {
     grid-template-columns: 1fr 1fr;
+  }
+  .sec-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .sec :deep(.ant-table-wrapper .ant-table.ant-table-small) {
+    font-size: 12.5px;
+  }
+  .sec :deep(.ant-table-wrapper .ant-table.ant-table-small .ant-table-cell) {
+    padding: 8px 6px;
   }
 }
 </style>

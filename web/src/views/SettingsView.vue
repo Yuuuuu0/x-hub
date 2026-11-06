@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
-import { Cloud, Download, FileKey, ShieldCheck, Shuffle, WandSparkles } from 'lucide-vue-next'
+import { AlertTriangle, Cloud, Download, FileKey, RotateCw, ShieldCheck, Shuffle, WandSparkles } from 'lucide-vue-next'
 import QRCode from 'qrcode'
 import { BASE, api, session, type AccessSettings, type AllSettings, type Release, type TLSMode } from '../lib/api'
 
@@ -22,6 +22,7 @@ const TLS_MODES: { value: TLSMode; title: string; desc: string; icon: any }[] = 
 
 const tab = ref('access')
 const loaded = ref(false)
+const loadError = ref('')
 const fingerprint = ref('')
 const access = reactive<AccessSettings>({
   listen: '', panelPath: '', publicUrl: '', tlsMode: 'selfsigned', certFile: '', keyFile: '', trustedProxies: [],
@@ -118,8 +119,18 @@ async function loadReleases() {
   }
 }
 
+/** 首次加载设置；失败时记录错误信息，页面显示错误态与重试按钮（清空错误后回到骨架屏）。 */
+async function tryLoad() {
+  loadError.value = ''
+  try {
+    await load()
+  } catch (e: any) {
+    loadError.value = e.message
+  }
+}
+
 onMounted(() => {
-  load().catch((e) => message.error(e.message))
+  tryLoad()
   loadReleases()
 })
 
@@ -331,7 +342,13 @@ async function saveAccount() {
       <h1>设置</h1>
     </header>
 
-    <a-skeleton v-if="!loaded" active />
+    <a-result v-if="loadError" status="error" title="设置加载失败" :sub-title="loadError">
+      <template #icon><AlertTriangle :size="48" class="load-error-ico" /></template>
+      <template #extra>
+        <a-button type="primary" @click="tryLoad"><RotateCw :size="14" class="btn-ico" />重试</a-button>
+      </template>
+    </a-result>
+    <a-skeleton v-else-if="!loaded" active />
     <a-tabs v-else v-model:activeKey="tab" class="tabs">
       <a-tab-pane key="access" tab="访问">
         <a-form layout="vertical" class="form" @submit.prevent="saveAccess">
@@ -763,6 +780,9 @@ h1 {
 .btn-ico {
   margin-right: 6px;
   vertical-align: -2px;
+}
+.load-error-ico {
+  color: var(--bad);
 }
 
 .actions {
