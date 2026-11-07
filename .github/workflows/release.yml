@@ -1,6 +1,5 @@
 name: Release
 
-# 推送到 main 构建 latest 镜像；推送 v* 标签构建版本镜像，并发布 GitHub Release。
 on:
   push:
     branches: [main]
@@ -16,13 +15,14 @@ env:
 
 jobs:
   image:
-    runs-on: ubuntu-latest
+    # 双重安全锁：确保只有你自己的账号触发时才执行
+    if: github.repository_owner == 'Yuuuuu0'
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # 计算被控端版本需要完整提交历史
+          fetch-depth: 0
 
-      # 版本号：标签构建用标签名，main 构建用 7 位短哈希；被控端版本为最后一次改动被控端代码的提交
       - id: ver
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -50,7 +50,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      # Dockerfile 在构建平台上交叉编译，多架构无需 QEMU。
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -61,12 +60,13 @@ jobs:
           build-args: |
             VERSION=${{ steps.ver.outputs.version }}
             AGENT_VERSION=${{ steps.ver.outputs.agent }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # 自建 Runner 直接使用本地路径做缓存，读写几乎零延迟
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
 
   binaries:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository_owner == 'Yuuuuu0'
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
         with:
@@ -93,7 +93,7 @@ jobs:
           make web
           AGENT_VERSION="$(make -s print-agent-version)"
           PKG=github.com/Yuuuuu0/x-hub/internal/version
-          mkdir -p release
+          rm -rf release && mkdir -p release
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X $PKG.Version=${AGENT_VERSION}" -o release/xhub-agent-linux-$arch ./cmd/agent
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X $PKG.Version=${VERSION} -X $PKG.AgentVersion=${AGENT_VERSION}" -o release/xhub-master-linux-$arch ./cmd/master
