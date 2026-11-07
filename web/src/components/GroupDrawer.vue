@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
+import { GripVertical, X } from 'lucide-vue-next'
 import type { PreviewNode, RouteGroup } from '../lib/api'
 import { BUILTINS, GROUP_TYPES, matchNodes } from '../lib/routing'
 
@@ -23,8 +24,12 @@ const form = reactive({
   strategy: 'consistent-hashing',
 })
 const original = ref('')
+const selectOpen = ref(false)
+const drag = reactive({ from: '', over: '' })
 
 watch(open, (v) => {
+  selectOpen.value = false
+  endDrag()
   if (!v) return
   const g = props.group
   original.value = g?.name ?? ''
@@ -47,6 +52,39 @@ const memberOptions = computed(() => [
   { label: '分组', options: props.groupNames.filter((n) => n !== original.value).map((n) => ({ value: n, label: n })) },
   { label: '内置', options: BUILTINS.map((n) => ({ value: n, label: n })) },
 ])
+
+/** 开始拖动已选成员标签，收起下拉面板以免遮挡。 */
+function onDragStart(value: string, e: DragEvent) {
+  selectOpen.value = false
+  drag.from = value
+  drag.over = value
+  e.dataTransfer!.effectAllowed = 'move'
+}
+
+/** 记录当前悬停的目标成员。 */
+function onDragOver(value: string) {
+  if (drag.from) drag.over = value
+}
+
+/** 松手后将成员移动到目标位置。 */
+function onDrop() {
+  const { from, over } = drag
+  endDrag()
+  if (!from || !over || from === over) return
+  const fromIdx = form.proxies.indexOf(from)
+  const overIdx = form.proxies.indexOf(over)
+  if (fromIdx < 0 || overIdx < 0) return
+  const next = [...form.proxies]
+  const [item] = next.splice(fromIdx, 1)
+  next.splice(overIdx, 0, item)
+  form.proxies = next
+}
+
+/** 清理成员拖动状态。 */
+function endDrag() {
+  drag.from = ''
+  drag.over = ''
+}
 
 /** 按当前筛选条件匹配预览订阅中的节点；正则无效时为 null。 */
 const matched = computed(() =>
@@ -107,8 +145,50 @@ function save() {
         </div>
       </template>
 
-      <a-form-item label="固定成员" extra="其他分组或内置出站，按选择顺序排在节点之前。">
-        <a-select v-model:value="form.proxies" mode="multiple" :options="memberOptions" placeholder="不添加固定成员" />
+      <a-form-item label="固定成员" extra="其他分组或内置出站，排在节点之前；拖动已选成员可调整顺序。">
+        <div @dragover.prevent @drop.prevent="onDrop">
+          <a-select
+            v-model:value="form.proxies"
+            v-model:open="selectOpen"
+            mode="multiple"
+            :options="memberOptions"
+            placeholder="不添加固定成员"
+          >
+            <template #tagRender="{ value, label, closable, onClose }">
+              <span
+                class="ant-select-selection-item member-tag"
+                :class="{
+                  lifted: drag.from === value,
+                  before:
+                    drag.from &&
+                    drag.over === value &&
+                    drag.from !== value &&
+                    form.proxies.indexOf(drag.from) > form.proxies.indexOf(value),
+                  after:
+                    drag.from &&
+                    drag.over === value &&
+                    drag.from !== value &&
+                    form.proxies.indexOf(drag.from) < form.proxies.indexOf(value),
+                }"
+                draggable="true"
+                title="拖动调整顺序"
+                @mousedown.stop
+                @click="selectOpen = !selectOpen"
+                @dragstart="onDragStart(value, $event)"
+                @dragenter.prevent="onDragOver(value)"
+                @dragover.prevent="onDragOver(value)"
+                @drop.prevent.stop="onDrop"
+                @dragend="endDrag"
+              >
+                <GripVertical :size="12" class="tag-grip" />
+                <span class="ant-select-selection-item-content">{{ label }}</span>
+                <span v-if="closable" class="ant-select-selection-item-remove" @mousedown.prevent.stop @click.stop="onClose">
+                  <X :size="12" />
+                </span>
+              </span>
+            </template>
+          </a-select>
+        </div>
       </a-form-item>
 
       <section class="nodes">
@@ -212,5 +292,39 @@ function save() {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.member-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-inline-start: 4px;
+  cursor: grab;
+  user-select: none;
+  transition:
+    box-shadow 0.15s,
+    opacity 0.15s;
+}
+.member-tag:active {
+  cursor: grabbing;
+}
+.member-tag.lifted {
+  opacity: 0.45;
+}
+.member-tag.before {
+  box-shadow: -2px 0 0 0 var(--text);
+}
+.member-tag.after {
+  box-shadow: 2px 0 0 0 var(--text);
+}
+.tag-grip {
+  flex: none;
+  color: var(--text-3);
+}
+.member-tag:hover .tag-grip {
+  color: var(--text);
+}
+.member-tag .ant-select-selection-item-remove {
+  display: inline-flex;
+  align-items: center;
 }
 </style>
