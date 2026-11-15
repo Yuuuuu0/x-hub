@@ -20,11 +20,23 @@ var installFiles = map[string]os.FileMode{"xray": 0o755, "geoip.dat": 0o644, "ge
 type Fetcher func(ctx context.Context, tag string) (body io.ReadCloser, sha256Hex string, err error)
 
 // Install 下载并安装指定版本：校验摘要与版本号后替换二进制并启动；
-// 若新版本启动失败则回滚到旧版本。安装视为期望运行。
+// 若新版本启动失败则回滚到旧版本。安装视为期望运行，且对同一运行中版本幂等。
 func (m *Manager) Install(ctx context.Context, tag string, fetch Fetcher) error {
-	staging := filepath.Join(m.dir, "staging")
-	os.RemoveAll(staging)
+	m.installMu.Lock()
+	defer m.installMu.Unlock()
+
+	if st := m.Status(); st.Version == tag && st.Running {
+		return nil
+	}
+
+	staging, err := os.MkdirTemp(m.dir, "staging-*")
+	if err != nil {
+		return err
+	}
 	defer os.RemoveAll(staging)
+	if err := os.Chmod(staging, 0o750); err != nil {
+		return err
+	}
 	if err := m.download(ctx, tag, fetch, staging); err != nil {
 		return err
 	}
@@ -53,7 +65,7 @@ func (m *Manager) Install(ctx context.Context, tag string, fetch Fetcher) error 
 	if err := m.setEnabled(true); err != nil {
 		return err
 	}
-	err := m.startProc()
+	err = m.startProc()
 	if err == nil {
 		err = m.waitStable(startCheck)
 	}

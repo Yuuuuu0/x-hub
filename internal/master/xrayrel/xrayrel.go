@@ -19,10 +19,13 @@ import (
 )
 
 const (
-	releasesURL = "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50"
-	downloadURL = "https://github.com/XTLS/Xray-core/releases/download/%s/%s"
-	listTTL     = 30 * time.Minute
+	defaultReleasesURL = "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50"
+	defaultDownloadURL = "https://github.com/XTLS/Xray-core/releases/download/%s/%s"
+	listTTL            = 30 * time.Minute
 )
+
+// ensureTimeout 为主控侧从上游拉取并落盘单个安装包的独立超时时长，不随调用方请求取消而中断。
+var ensureTimeout = 5 * time.Minute
 
 // assetNames 为各架构对应的官方发布包名。
 var assetNames = map[string]string{
@@ -41,20 +44,49 @@ type Release struct {
 
 // Service 提供发布列表查询与安装包缓存。
 type Service struct {
-	dir    string
-	client *http.Client
+	dir         string
+	client      *http.Client
+	releasesURL string
+	downloadURL string
 
 	mu        sync.Mutex
 	list      []Release
 	fetchedAt time.Time
 
-	dlMu  sync.Mutex
-	locks map[string]*sync.Mutex
+	dlMu     sync.Mutex
+	inflight map[string]*downloadJob
+}
+
+type ensureResult struct {
+	path string
+	sum  string
+	err  error
+}
+
+type downloadJob struct {
+	done chan struct{}
+	res  ensureResult
 }
 
 // New 创建服务，安装包缓存于 dir。
 func New(dir string) *Service {
-	return &Service{dir: dir, client: &http.Client{Timeout: 5 * time.Minute}, locks: map[string]*sync.Mutex{}}
+	return &Service{
+		dir:         dir,
+		client:      &http.Client{Timeout: 5 * time.Minute},
+		releasesURL: defaultReleasesURL,
+		downloadURL: defaultDownloadURL,
+		inflight:    map[string]*downloadJob{},
+	}
+}
+
+// SetEndpoints 覆盖版本列表与安装包模板地址，用于测试环境注入本地服务。
+func (s *Service) SetEndpoints(releasesURL, downloadURL string) {
+	s.mu.Lock()
+	s.releasesURL = releasesURL
+	s.mu.Unlock()
+	s.dlMu.Lock()
+	s.downloadURL = downloadURL
+	s.dlMu.Unlock()
 }
 
 // SupportedArch 判断是否提供该架构的安装包。
@@ -82,7 +114,7 @@ func (s *Service) List(ctx context.Context) ([]Release, error) {
 }
 
 func (s *Service) fetch(ctx context.Context) ([]Release, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, releasesURL, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.releasesURL, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -125,54 +157,83 @@ func LatestStable(list []Release, max string) (string, bool) {
 }
 
 // Ensure 确保指定版本与架构的安装包已下载并通过 SHA-256 校验，返回本地路径与摘要。
+// 上游下载使用独立的超时上下文执行，避免首个调用方取消请求连带中断其他等待方；调用方通过 ctx 及时取消自身等待。
 func (s *Service) Ensure(ctx context.Context, tag, arch string) (path, sum string, err error) {
 	asset, ok := assetNames[arch]
 	if !ok || !xraycap.IsValidTag(tag) {
 		return "", "", fmt.Errorf("不支持的版本或架构：%s %s", tag, arch)
 	}
+	if err := ctx.Err(); err != nil {
+		return "", "", err
+	}
 	path = filepath.Join(s.dir, tag, asset)
 
 	s.dlMu.Lock()
-	lock := s.locks[path]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		s.locks[path] = lock
+	job := s.inflight[path]
+	if job == nil {
+		if b, err := os.ReadFile(path + ".sha256"); err == nil {
+			if _, err := os.Stat(path); err == nil {
+				s.dlMu.Unlock()
+				return path, string(b), nil
+			}
+		}
+		job = &downloadJob{done: make(chan struct{})}
+		s.inflight[path] = job
+		go s.runEnsure(job, path, tag, asset, s.downloadURL)
 	}
 	s.dlMu.Unlock()
-	lock.Lock()
-	defer lock.Unlock()
 
-	if b, err := os.ReadFile(path + ".sha256"); err == nil {
-		if _, err := os.Stat(path); err == nil {
-			return path, string(b), nil
-		}
+	select {
+	case <-job.done:
+		return job.res.path, job.res.sum, job.res.err
+	case <-ctx.Done():
+		return "", "", ctx.Err()
 	}
-	want, err := s.fetchDigest(ctx, tag, asset)
+}
+
+func (s *Service) runEnsure(job *downloadJob, path, tag, asset, downloadURL string) {
+	dlCtx, cancel := context.WithTimeout(context.Background(), ensureTimeout)
+	defer cancel()
+
+	sum, err := s.fetchAndSave(dlCtx, path, tag, asset, downloadURL)
 	if err != nil {
-		return "", "", err
+		job.res = ensureResult{err: err}
+	} else {
+		job.res = ensureResult{path: path, sum: sum}
+	}
+	s.dlMu.Lock()
+	delete(s.inflight, path)
+	s.dlMu.Unlock()
+	close(job.done)
+}
+
+func (s *Service) fetchAndSave(ctx context.Context, path, tag, asset, downloadURL string) (string, error) {
+	want, err := s.fetchDigest(ctx, tag, asset, downloadURL)
+	if err != nil {
+		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", "", err
+		return "", err
 	}
 	got, err := s.download(ctx, fmt.Sprintf(downloadURL, tag, asset), path+".part")
 	if err != nil {
 		os.Remove(path + ".part")
-		return "", "", err
+		return "", err
 	}
 	if got != want {
 		os.Remove(path + ".part")
-		return "", "", fmt.Errorf("Xray 安装包校验失败：期望 %s，实际 %s", want, got)
+		return "", fmt.Errorf("Xray 安装包校验失败：期望 %s，实际 %s", want, got)
 	}
 	if err := os.Rename(path+".part", path); err != nil {
-		return "", "", err
+		return "", err
 	}
 	if err := os.WriteFile(path+".sha256", []byte(got), 0o644); err != nil {
-		return "", "", err
+		return "", err
 	}
-	return path, got, nil
+	return got, nil
 }
 
-func (s *Service) fetchDigest(ctx context.Context, tag, asset string) (string, error) {
+func (s *Service) fetchDigest(ctx context.Context, tag, asset, downloadURL string) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf(downloadURL, tag, asset+".dgst"), nil)
 	resp, err := s.client.Do(req)
 	if err != nil {

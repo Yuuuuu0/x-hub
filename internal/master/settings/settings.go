@@ -45,10 +45,9 @@ type Access struct {
 	TrustedProxies []string `json:"trustedProxies"`
 }
 
-// Xray 为 Xray 版本管理设置。空值表示不限制 / 使用最新稳定版。
+// Xray 为 Xray 版本管理设置。MaxVersion 为空表示不限制版本上限，默认使用最新稳定版。
 type Xray struct {
-	DefaultVersion string `json:"defaultVersion"`
-	MaxVersion     string `json:"maxVersion"`
+	MaxVersion string `json:"maxVersion"`
 }
 
 // Security 为登录安全设置。
@@ -256,17 +255,8 @@ func (s *Service) Xray() Xray {
 
 // SaveXray 校验并保存 Xray 设置。
 func (s *Service) SaveXray(x Xray) error {
-	for _, v := range []string{x.DefaultVersion, x.MaxVersion} {
-		if v != "" && !xraycap.IsValidTag(v) {
-			return fmt.Errorf("版本号格式应为 v26.7.28：%s", v)
-		}
-	}
-	if x.DefaultVersion != "" && x.MaxVersion != "" {
-		d, _ := xraycap.ParseVersion(x.DefaultVersion)
-		m, _ := xraycap.ParseVersion(x.MaxVersion)
-		if d.Compare(m) > 0 {
-			return fmt.Errorf("默认安装版本不能高于版本上限")
-		}
+	if x.MaxVersion != "" && !xraycap.IsValidTag(x.MaxVersion) {
+		return fmt.Errorf("版本号格式应为 v26.7.28：%s", x.MaxVersion)
 	}
 	if err := s.store.PutSetting(keyXray, x); err != nil {
 		return err

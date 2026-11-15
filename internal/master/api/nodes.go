@@ -21,6 +21,7 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/hub"
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 	"github.com/Yuuuuu0/x-hub/internal/master/sub"
+	"github.com/Yuuuuu0/x-hub/internal/master/xrayrel"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
 	"github.com/Yuuuuu0/x-hub/internal/shared/tlspin"
 	"github.com/Yuuuuu0/x-hub/internal/shared/xraycap"
@@ -293,6 +294,12 @@ func (h *Handler) installCommand(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"command": cmd, "expireAt": expire})
 }
 
+var (
+	installPollInterval  = 500 * time.Millisecond
+	installReconnectWait = 30 * time.Second
+	installConvergeWait  = 20 * time.Second
+)
+
 // xrayAction 控制服务器上的 Xray：启动、停止、重启或安装指定版本。
 func (h *Handler) xrayAction(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
@@ -304,28 +311,151 @@ func (h *Handler) xrayAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	timeout := 30 * time.Second
 	switch cmd.Action {
 	case protocol.XrayStart, protocol.XrayStop, protocol.XrayRestart:
 		cmd.Version = ""
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		var st protocol.XrayStatus
+		if err := h.Hub.Request(ctx, id, protocol.TypeXray, cmd, &st); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if st != (protocol.XrayStatus{}) {
+			h.Hub.SetXray(id, st)
+		}
+		writeJSON(w, http.StatusOK, st)
 	case protocol.XrayInstall:
-		timeout = 6 * time.Minute
 		if err := h.checkInstallVersion(r.Context(), &cmd); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		n, err := h.Store.GetNode(id)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		if !h.Hub.State(id).Online {
+			writeError(w, http.StatusBadGateway, hub.ErrOffline.Error())
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 6*time.Minute)
+		defer cancel()
+		if xrayrel.SupportedArch(n.Host.Arch) {
+			if _, _, err := h.Releases.Ensure(ctx, cmd.Version, n.Host.Arch); err != nil {
+				writeError(w, http.StatusBadGateway, err.Error())
+				return
+			}
+		}
+		st, err := h.installXrayNode(ctx, id, cmd.Version)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
 	default:
 		writeError(w, http.StatusBadRequest, "未知操作")
-		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
+}
+
+func isTargetXrayReady(st hub.RuntimeState, target string) bool {
+	return st.Online && st.Xray.Version == target && st.Xray.Running
+}
+
+func (h *Handler) finishXrayInstallRequest(nodeID int64, target string, st protocol.XrayStatus) protocol.XrayStatus {
+	if st != (protocol.XrayStatus{}) {
+		h.Hub.SetXray(nodeID, st)
+		return st
+	}
+	if cur := h.Hub.State(nodeID); isTargetXrayReady(cur, target) {
+		h.Hub.SetXray(nodeID, cur.Xray)
+		return cur.Xray
+	}
+	return st
+}
+
+// installXrayNode 向在线节点下发 Xray 安装指令并同步状态；断线时等待重连与状态收敛，必要时重试一次。
+func (h *Handler) installXrayNode(ctx context.Context, nodeID int64, target string) (protocol.XrayStatus, error) {
+	reqCmd := protocol.XrayCommand{Action: protocol.XrayInstall, Version: target}
 	var st protocol.XrayStatus
-	if err := h.Hub.Request(ctx, id, protocol.TypeXray, cmd, &st); err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
-		return
+	err := h.Hub.Request(ctx, nodeID, protocol.TypeXray, reqCmd, &st)
+	if err == nil {
+		return h.finishXrayInstallRequest(nodeID, target, st), nil
 	}
-	writeJSON(w, http.StatusOK, st)
+	if !errors.Is(err, hub.ErrOffline) {
+		if cur := h.Hub.State(nodeID); isTargetXrayReady(cur, target) {
+			h.Hub.SetXray(nodeID, cur.Xray)
+			return cur.Xray, nil
+		}
+		return protocol.XrayStatus{}, err
+	}
+
+	converged, retry, werr := h.waitReconnectConverge(ctx, nodeID, target)
+	if !retry {
+		return converged, werr
+	}
+
+	var retrySt protocol.XrayStatus
+	retryErr := h.Hub.Request(ctx, nodeID, protocol.TypeXray, reqCmd, &retrySt)
+	if retryErr == nil {
+		return h.finishXrayInstallRequest(nodeID, target, retrySt), nil
+	}
+	if cur := h.Hub.State(nodeID); isTargetXrayReady(cur, target) {
+		h.Hub.SetXray(nodeID, cur.Xray)
+		return cur.Xray, nil
+	}
+	return protocol.XrayStatus{}, retryErr
+}
+
+func (h *Handler) waitReconnectConverge(ctx context.Context, nodeID int64, target string) (protocol.XrayStatus, bool, error) {
+	ticker := time.NewTicker(installPollInterval)
+	defer ticker.Stop()
+
+	var offlineSince, onlineSince time.Time
+	check := func() (st protocol.XrayStatus, shouldRetry bool, done bool, err error) {
+		now := time.Now()
+		cur := h.Hub.State(nodeID)
+		if !cur.Online {
+			onlineSince = time.Time{}
+			if offlineSince.IsZero() {
+				offlineSince = now
+			}
+			if now.Sub(offlineSince) >= installReconnectWait {
+				return protocol.XrayStatus{}, false, true, hub.ErrOffline
+			}
+			return protocol.XrayStatus{}, false, false, nil
+		}
+		offlineSince = time.Time{}
+		if isTargetXrayReady(cur, target) {
+			h.Hub.SetXray(nodeID, cur.Xray)
+			return cur.Xray, false, true, nil
+		}
+		if onlineSince.IsZero() {
+			onlineSince = now
+		}
+		if now.Sub(onlineSince) >= installConvergeWait {
+			return protocol.XrayStatus{}, true, true, nil
+		}
+		return protocol.XrayStatus{}, false, false, nil
+	}
+
+	if st, retry, done, err := check(); done {
+		return st, retry, err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			if cur := h.Hub.State(nodeID); isTargetXrayReady(cur, target) {
+				h.Hub.SetXray(nodeID, cur.Xray)
+				return cur.Xray, false, nil
+			}
+			return protocol.XrayStatus{}, false, ctx.Err()
+		case <-ticker.C:
+			if st, retry, done, err := check(); done {
+				return st, retry, err
+			}
+		}
+	}
 }
 
 // checkInstallVersion 补全默认版本，并拒绝超过版本上限的安装请求。
@@ -434,7 +564,14 @@ func (h *Handler) pinXray(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, n)
 }
 
-// batchInstall 把所有在线服务器的 Xray 切换到目标版本（锁定版本的服务器切换到其锁定版本），并发执行。
+func nodeCurrentVersion(st hub.RuntimeState, fallback string) string {
+	if st.Xray.Version != "" {
+		return st.Xray.Version
+	}
+	return fallback
+}
+
+// batchInstall 把所有已接入的在线服务器 Xray 切换到目标版本（锁定版本的服务器切换到其锁定版本），并发执行。
 func (h *Handler) batchInstall(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Version string `json:"version"`
@@ -460,35 +597,103 @@ func (h *Handler) batchInstall(w http.ResponseWriter, r *http.Request) {
 		Status  string `json:"status"` // done / skipped / failed / offline
 		Error   string `json:"error,omitempty"`
 	}
-	out := make([]result, len(nodes))
+	enrolled := make([]*store.Node, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Enrolled {
+			enrolled = append(enrolled, n)
+		}
+	}
+	out := make([]result, len(enrolled))
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Minute)
 	defer cancel()
-	var wg sync.WaitGroup
-	for i, n := range nodes {
+
+	type pkgKey struct{ version, arch string }
+	type pendingNode struct {
+		idx    int
+		node   *store.Node
+		target string
+		pkg    pkgKey
+		needDL bool
+	}
+	var pending []pendingNode
+	packages := map[pkgKey]error{}
+
+	for i, n := range enrolled {
 		target := cmd.Version
 		if n.XrayPinned != "" {
 			target = n.XrayPinned
 		}
-		out[i] = result{NodeID: n.ID, Name: n.Name, Version: target}
 		st := h.Hub.State(n.ID)
 		switch {
 		case !st.Online:
-			out[i].Status = "offline"
-			continue
+			out[i] = result{NodeID: n.ID, Name: n.Name, Version: n.XrayVersion, Status: "offline"}
 		case st.Xray.Version == target:
-			out[i].Status = "skipped"
-			continue
+			out[i] = result{NodeID: n.ID, Name: n.Name, Version: target, Status: "skipped"}
+		default:
+			needDL := xrayrel.SupportedArch(n.Host.Arch)
+			pkg := pkgKey{version: target, arch: n.Host.Arch}
+			if needDL {
+				packages[pkg] = nil
+			}
+			pending = append(pending, pendingNode{idx: i, node: n, target: target, pkg: pkg, needDL: needDL})
+		}
+	}
+
+	if len(packages) > 0 {
+		pkgKeys := make([]pkgKey, 0, len(packages))
+		for p := range packages {
+			pkgKeys = append(pkgKeys, p)
+		}
+		var pmu sync.Mutex
+		var pwg sync.WaitGroup
+		for _, pkg := range pkgKeys {
+			pwg.Add(1)
+			go func(p pkgKey) {
+				defer pwg.Done()
+				if _, _, err := h.Releases.Ensure(ctx, p.version, p.arch); err != nil {
+					pmu.Lock()
+					packages[p] = err
+					pmu.Unlock()
+				}
+			}(pkg)
+		}
+		pwg.Wait()
+	}
+
+	var wg sync.WaitGroup
+	for _, item := range pending {
+		if item.needDL {
+			if err := packages[item.pkg]; err != nil {
+				out[item.idx] = result{
+					NodeID:  item.node.ID,
+					Name:    item.node.Name,
+					Version: nodeCurrentVersion(h.Hub.State(item.node.ID), item.node.XrayVersion),
+					Status:  "failed",
+					Error:   err.Error(),
+				}
+				continue
+			}
 		}
 		wg.Add(1)
-		go func(i int, id int64, target string) {
+		go func(item pendingNode) {
 			defer wg.Done()
-			err := h.Hub.Request(ctx, id, protocol.TypeXray, protocol.XrayCommand{Action: protocol.XrayInstall, Version: target}, nil)
-			if err != nil {
-				out[i].Status, out[i].Error = "failed", err.Error()
-			} else {
-				out[i].Status = "done"
+			if _, err := h.installXrayNode(ctx, item.node.ID, item.target); err != nil {
+				out[item.idx] = result{
+					NodeID:  item.node.ID,
+					Name:    item.node.Name,
+					Version: nodeCurrentVersion(h.Hub.State(item.node.ID), item.node.XrayVersion),
+					Status:  "failed",
+					Error:   err.Error(),
+				}
+				return
 			}
-		}(i, n.ID, target)
+			out[item.idx] = result{
+				NodeID:  item.node.ID,
+				Name:    item.node.Name,
+				Version: item.target,
+				Status:  "done",
+			}
+		}(item)
 	}
 	wg.Wait()
 	writeJSON(w, http.StatusOK, map[string]any{"results": out})

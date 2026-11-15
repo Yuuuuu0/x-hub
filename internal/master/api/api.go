@@ -191,22 +191,27 @@ func (h *Handler) OnAgentHello(nodeID int64, hello protocol.Hello) {
 		return
 	}
 	h.Log.Info("auto installing xray", "node", nodeID, "version", ver)
-	if err := h.Hub.Request(ctx, nodeID, protocol.TypeXray, protocol.XrayCommand{Action: protocol.XrayInstall, Version: ver}, nil); err != nil {
+	if _, _, err := h.Releases.Ensure(ctx, ver, hello.Host.Arch); err != nil {
+		h.Log.Warn("prewarm xray package", "node", nodeID, "err", err)
+		return
+	}
+	var st protocol.XrayStatus
+	if err := h.Hub.Request(ctx, nodeID, protocol.TypeXray, protocol.XrayCommand{Action: protocol.XrayInstall, Version: ver}, &st); err != nil {
 		h.Log.Warn("auto install xray", "node", nodeID, "err", err)
+		return
+	}
+	if st != (protocol.XrayStatus{}) {
+		h.Hub.SetXray(nodeID, st)
 	}
 }
 
-// defaultXrayVersion 返回设置中的默认版本，未设置时取不超过上限的最新稳定版。
+// defaultXrayVersion 返回不超过版本上限的最新稳定版。
 func (h *Handler) defaultXrayVersion(ctx context.Context) (string, error) {
-	x := h.Settings.Xray()
-	if x.DefaultVersion != "" {
-		return x.DefaultVersion, nil
-	}
 	list, err := h.Releases.List(ctx)
 	if err != nil {
 		return "", err
 	}
-	if v, ok := xrayrel.LatestStable(list, x.MaxVersion); ok {
+	if v, ok := xrayrel.LatestStable(list, h.Settings.Xray().MaxVersion); ok {
 		return v, nil
 	}
 	return "", errors.New("没有可用的 Xray 稳定版本")

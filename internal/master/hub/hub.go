@@ -87,6 +87,8 @@ type conn struct {
 	lastTouch time.Time
 	xrayVer   string
 	caps      []string
+
+	dbMu sync.Mutex // 串行化单连接状态落库，保证数据库最终态与最新内存态一致
 }
 
 // Serve 接管一个已通过认证的被控端 WebSocket 连接，直到连接断开。
@@ -207,24 +209,42 @@ func (c *conn) onHeartbeat(hb *protocol.Heartbeat) {
 	}
 	c.state.Heartbeat, c.lastHBAt = hb, now
 	c.state.Xray, c.state.Caps = hb.Xray, hb.Caps
-	changed := hb.Xray.Version != c.xrayVer || !slices.Equal(hb.Caps, c.caps)
-	touch := now.Sub(c.lastTouch) >= touchEvery
-	if changed {
-		c.xrayVer, c.caps = hb.Xray.Version, hb.Caps
-	}
-	if changed || touch {
-		c.lastTouch = now
-	}
 	c.smu.Unlock()
 
-	var err error
+	c.persistRuntime()
+}
+
+// persistRuntime 将当前连接的最新 Xray 版本与能力落库；仅在写库成功后推进已落库基线，使瞬时失败可在后续心跳自动补写。
+func (c *conn) persistRuntime() {
+	c.dbMu.Lock()
+	defer c.dbMu.Unlock()
+
+	now := time.Now()
+	c.smu.RLock()
+	ver := c.state.Xray.Version
+	caps := slices.Clone(c.state.Caps)
+	changed := ver != c.xrayVer || !slices.Equal(caps, c.caps)
+	touch := now.Sub(c.lastTouch) >= touchEvery
+	c.smu.RUnlock()
+
 	if changed {
-		err = c.hub.store.UpdateNodeXray(c.nodeID, hb.Xray.Version, hb.Caps)
-	} else if touch {
-		err = c.hub.store.TouchNode(c.nodeID)
+		if err := c.hub.store.UpdateNodeXray(c.nodeID, ver, caps); err != nil {
+			c.hub.log.Warn("persist xray status", "node", c.nodeID, "err", err)
+			return
+		}
+		c.smu.Lock()
+		c.xrayVer, c.caps, c.lastTouch = ver, caps, now
+		c.smu.Unlock()
+		return
 	}
-	if err != nil {
-		c.hub.log.Warn("persist heartbeat", "node", c.nodeID, "err", err)
+	if touch {
+		if err := c.hub.store.TouchNode(c.nodeID); err != nil {
+			c.hub.log.Warn("persist heartbeat", "node", c.nodeID, "err", err)
+			return
+		}
+		c.smu.Lock()
+		c.lastTouch = now
+		c.smu.Unlock()
 	}
 }
 
@@ -304,6 +324,18 @@ func (h *Hub) State(nodeID int64) RuntimeState {
 	c.smu.RLock()
 	defer c.smu.RUnlock()
 	return c.state
+}
+
+// SetXray 立即同步在线连接的 Xray 状态；若版本变化则同步更新数据库，消除等待下次心跳的竞态。
+func (h *Hub) SetXray(nodeID int64, x protocol.XrayStatus) {
+	c := h.get(nodeID)
+	if c == nil {
+		return
+	}
+	c.smu.Lock()
+	c.state.Xray = x
+	c.smu.Unlock()
+	c.persistRuntime()
 }
 
 // Request 向服务器发送指令并等待应答，out 非空时解码应答数据。

@@ -25,9 +25,10 @@ const (
 	logLines     = 1000
 	stopTimeout  = 5 * time.Second
 	stableUptime = 30 * time.Second // 运行超过该时长的退出不计入崩溃退避
-	startCheck   = 3 * time.Second  // 安装或应用配置后观察该时长内未退出视为启动成功
 	maxBackoff   = time.Minute
 )
+
+var startCheck = 3 * time.Second // 安装或应用配置后观察该时长内未退出视为启动成功
 
 var versionRe = regexp.MustCompile(`Xray (\d+\.\d+\.\d+)`)
 
@@ -39,12 +40,13 @@ type state struct {
 	AppliedHash string `json:"appliedHash"` // 已应用的主控配置哈希
 }
 
-// Manager 托管一个 Xray 子进程。ops 串行化启停与安装操作，mu 保护运行时字段。
+// Manager 托管一个 Xray 子进程。ops 串行化启停与安装切换，installMu 串行化安装全过程，mu 保护运行时字段。
 type Manager struct {
-	dir  string
-	log  *slog.Logger
-	logs *ring
-	ops  sync.Mutex
+	dir       string
+	log       *slog.Logger
+	logs      *ring
+	ops       sync.Mutex
+	installMu sync.Mutex
 
 	changes chan struct{}
 	// beforeStop 在停止 Xray 前调用，用于先读走内存中的流量计数。

@@ -145,3 +145,54 @@ func TestReplaceAndKickDoNotBlock(t *testing.T) {
 		t.Fatalf("kick took %s", d)
 	}
 }
+
+// TestSetXray 验证 SetXray 在连接在线时立即更新内存态与数据库版本，离线时静默忽略。
+func TestSetXray(t *testing.T) {
+	env := newTestEnv(t, nil)
+
+	// 离线调用不应报错或更新数据库
+	env.hub.SetXray(env.nodeID, protocol.XrayStatus{Installed: true, Version: "v26.8.1", Running: true})
+	if st := env.hub.State(env.nodeID); st.Online || st.Xray.Version != "" {
+		t.Fatalf("offline SetXray should be no-op, got %+v", st)
+	}
+	n, err := env.hub.store.GetNode(env.nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.XrayVersion != "" {
+		t.Fatalf("offline SetXray should not update store, got %q", n.XrayVersion)
+	}
+
+	// 在线调用应同步更新 State.Xray、xrayVer、lastTouch 与数据库
+	ws := env.dial(t)
+	defer ws.CloseNow()
+	c := waitRegistered(t, env.hub, env.nodeID, nil)
+
+	want := protocol.XrayStatus{Installed: true, Version: "v26.8.1", Enabled: true, Running: true, StartedAt: 12345}
+	env.hub.SetXray(env.nodeID, want)
+
+	st := env.hub.State(env.nodeID)
+	if st.Xray != want {
+		t.Fatalf("State.Xray = %+v, want %+v", st.Xray, want)
+	}
+	c.smu.RLock()
+	gotVer := c.xrayVer
+	c.smu.RUnlock()
+	if gotVer != "v26.8.1" {
+		t.Fatalf("conn.xrayVer = %q, want %q", gotVer, "v26.8.1")
+	}
+	n, err = env.hub.store.GetNode(env.nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.XrayVersion != "v26.8.1" {
+		t.Fatalf("store.XrayVersion = %q, want %q", n.XrayVersion, "v26.8.1")
+	}
+
+	// 同版本仅运行态变化时，应更新 State.Xray 但不重置版本
+	stopped := protocol.XrayStatus{Installed: true, Version: "v26.8.1", Enabled: false, Running: false}
+	env.hub.SetXray(env.nodeID, stopped)
+	if st := env.hub.State(env.nodeID); st.Xray != stopped {
+		t.Fatalf("State.Xray after stop = %+v, want %+v", st.Xray, stopped)
+	}
+}
