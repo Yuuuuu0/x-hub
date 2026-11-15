@@ -31,7 +31,7 @@ const proxiesText = ref('')
 let savedAccess: AccessSettings | null = null
 const inContainer = ref(false)
 
-const xray = reactive({ defaultVersion: undefined as string | undefined, maxVersion: undefined as string | undefined })
+const xray = reactive({ maxVersion: undefined as string | undefined })
 const releases = ref<Release[]>([])
 const releasesLoading = ref(false)
 
@@ -96,7 +96,6 @@ async function load() {
   inContainer.value = !!s.inContainer
   proxiesText.value = (s.access.trustedProxies ?? []).join('\n')
   fingerprint.value = s.selfSignedFingerprint ?? ''
-  xray.defaultVersion = s.xray.defaultVersion || undefined
   xray.maxVersion = s.xray.maxVersion || undefined
   sessionHours.value = s.security.sessionHours
   Object.assign(subSettings, s.subscription)
@@ -290,7 +289,7 @@ function saveAccess() {
 async function saveXray() {
   saving.xray = true
   try {
-    await api.put('settings/xray', { defaultVersion: xray.defaultVersion ?? '', maxVersion: xray.maxVersion ?? '' })
+    await api.put('settings/xray', { maxVersion: xray.maxVersion ?? '' })
     message.success('Xray 设置已保存')
     loadReleases()
   } catch (e: any) {
@@ -425,10 +424,7 @@ async function saveAccount() {
         <a-form layout="vertical" class="form" @submit.prevent="saveXray">
           <div class="group">
             <h2>版本</h2>
-            <a-form-item label="默认安装版本" extra="新接入的服务器自动安装该版本。留空则使用不超过上限的最新稳定版。">
-              <a-select v-model:value="xray.defaultVersion" :options="releaseOptions" :loading="releasesLoading" allow-clear show-search placeholder="最新稳定版" class="mono" />
-            </a-form-item>
-            <a-form-item label="版本上限" extra="高于该版本的 Xray 不允许安装，适合需要兼容特定客户端的场景。">
+            <a-form-item label="版本上限" extra="默认安装与切换使用不超过上限的最新稳定版；高于该版本的 Xray 不允许安装，适合需要兼容特定客户端的场景。">
               <a-select v-model:value="xray.maxVersion" :options="releaseOptions" :loading="releasesLoading" allow-clear show-search placeholder="不限制" class="mono" />
             </a-form-item>
           </div>

@@ -155,7 +155,6 @@ export interface AccessSettings {
 }
 
 export interface XraySettings {
-  defaultVersion: string
   maxVersion: string
 }
 

@@ -47,7 +47,7 @@ async function load() {
 }
 
 // 操作后统一用 refresh 刷新：与轮询串行执行，不会被跳过，也不会被操作前发出的轮询结果覆盖
-const { refresh } = usePolling(load, () => (showInstall.value ? POLL_FAST_MS : POLL_MS))
+const { refresh } = usePolling(load, () => (showInstall.value || showBatch.value ? POLL_FAST_MS : POLL_MS))
 
 /** 弹窗使用列表中的最新数据，以便实时显示接入状态。 */
 const live = computed(() => nodes.value.find((n) => n.id === current.value?.id) ?? current.value)
@@ -72,6 +72,11 @@ function openForm(n: NodeItem | null) {
 function open(n: NodeItem, which: 'install' | 'versions' | 'logs') {
   current.value = n
   ;({ install: showInstall, versions: showVersions, logs: showLogs })[which].value = true
+  if (which === 'versions') refresh()
+}
+
+function openBatch() {
+  showBatch.value = true
 }
 
 function onSaved(n: NodeItem, created: boolean) {
@@ -124,7 +129,7 @@ function remove(n: NodeItem) {
         <h1>服务器</h1>
       </div>
       <div class="hero-acts">
-        <a-button v-if="nodes.some((n) => n.enrolled)" size="large" class="add" @click="showBatch = true">
+        <a-button v-if="nodes.some((n) => n.enrolled)" size="large" class="add" @click="openBatch">
           <Layers :size="17" />
           批量切换 Xray
         </a-button>
@@ -191,9 +196,9 @@ function remove(n: NodeItem) {
 
     <NodeFormModal v-model:open="showForm" :node="current" :countries="countries" @saved="onSaved" />
     <InstallCommandModal v-model:open="showInstall" :node="live" />
-    <XrayInstallModal v-model:open="showVersions" :node="current" @done="refresh" />
-    <LogsDrawer v-model:open="showLogs" :node="current" />
-    <BatchUpgradeModal v-model:open="showBatch" :nodes="nodes" @done="refresh" />
+    <XrayInstallModal v-model:open="showVersions" :node="live" @done="refresh" />
+    <LogsDrawer v-model:open="showLogs" :node="live" />
+    <BatchUpgradeModal v-model:open="showBatch" :nodes="nodes" @refresh="refresh" @done="refresh" />
   </section>
 </template>
 
