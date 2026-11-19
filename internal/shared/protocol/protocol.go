@@ -114,6 +114,7 @@ type ProbeRequest struct {
 	Target     string `json:"target,omitempty"`     // reality_target：域名:端口
 	ServerName string `json:"serverName,omitempty"` // reality_target：握手使用的 SNI
 	Port       int    `json:"port,omitempty"`       // port
+	Network    string `json:"network,omitempty"`    // port：tcp（默认）或 udp
 	CertFile   string `json:"certFile,omitempty"`   // cert_files
 	KeyFile    string `json:"keyFile,omitempty"`    // cert_files
 }

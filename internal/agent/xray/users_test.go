@@ -49,3 +49,18 @@ func TestUsersOnlyDiff(t *testing.T) {
 		t.Fatal("new inbound must require restart")
 	}
 }
+
+func TestUsersOnlyDiffHysteria(t *testing.T) {
+	hy := func(clients string) []byte {
+		return []byte(`{"inbounds":[{"tag":"in-3","protocol":"hysteria","port":443,"settings":{"version":2,"clients":[` + clients + `]}}]}`)
+	}
+	ops, ok := usersOnlyDiff(hy(`{"email":"s1.i3","auth":"a1"}`), hy(`{"email":"s1.i3","auth":"a2"}`))
+	if !ok || len(ops) != 2 {
+		t.Fatalf("hysteria auth change must be applied online: %v %+v", ok, ops)
+	}
+	for _, op := range ops {
+		if op.Add != nil && (op.Add.Auth != "a2" || account(op.Protocol, op.Add) == nil) {
+			t.Fatalf("hysteria add op: %+v", op.Add)
+		}
+	}
+}

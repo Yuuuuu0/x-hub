@@ -10,6 +10,7 @@ import (
 	handlercmd "github.com/xtls/xray-core/app/proxyman/command"
 	xproto "github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
+	hyaccount "github.com/xtls/xray-core/proxy/hysteria/account"
 	"github.com/xtls/xray-core/proxy/shadowsocks_2022"
 	"github.com/xtls/xray-core/proxy/trojan"
 	"github.com/xtls/xray-core/proxy/vless"
@@ -26,12 +27,13 @@ type userOp struct {
 	Remove   string
 }
 
-// client 为各协议客户端字段的并集：VLESS / VMess 用 ID，Trojan / SS2022 用 Password。
+// client 为各协议客户端字段的并集：VLESS / VMess 用 ID，Trojan / SS2022 用 Password，Hysteria2 用 Auth。
 type client struct {
 	Email    string `json:"email"`
 	ID       string `json:"id"`
 	Flow     string `json:"flow"`
 	Password string `json:"password"`
+	Auth     string `json:"auth"`
 }
 
 type inboundUsers struct {
@@ -40,7 +42,7 @@ type inboundUsers struct {
 }
 
 // onlineProtocols 为支持经 HandlerService 在线增删用户的入站协议。
-var onlineProtocols = map[string]bool{"vless": true, "vmess": true, "trojan": true, "shadowsocks": true}
+var onlineProtocols = map[string]bool{"vless": true, "vmess": true, "trojan": true, "shadowsocks": true, "hysteria": true}
 
 // usersOnlyDiff 判断新旧主控配置是否只有入站 clients 不同。是则返回所需的用户增删操作（可能为空）；
 // 否则返回 ok=false，由调用方重启 Xray。
@@ -145,6 +147,8 @@ func account(protocol string, c *client) *serial.TypedMessage {
 		return serial.ToTypedMessage(&trojan.Account{Password: c.Password})
 	case "shadowsocks":
 		return serial.ToTypedMessage(&shadowsocks_2022.Account{Key: c.Password})
+	case "hysteria":
+		return serial.ToTypedMessage(&hyaccount.Account{Auth: c.Auth})
 	default:
 		return serial.ToTypedMessage(&vless.Account{Id: c.ID, Flow: c.Flow})
 	}

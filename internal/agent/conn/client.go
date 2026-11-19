@@ -372,7 +372,7 @@ func (c *Client) handleProbe(ctx context.Context, raw json.RawMessage) protocol.
 	case protocol.ProbeRealityTarget:
 		return okResult(probe.RealityTarget(ctx, req.Target, req.ServerName))
 	case protocol.ProbePort:
-		return okResult(c.xray.PortStatus(req.Port))
+		return okResult(c.xray.PortStatus(req.Port, req.Network))
 	case protocol.ProbeCertFiles:
 		return okResult(certs.CheckFiles(req.CertFile, req.KeyFile))
 	}

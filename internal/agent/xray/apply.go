@@ -143,8 +143,15 @@ func (m *Manager) withManagement(cfg []byte) ([]byte, error) {
 }
 
 // PortStatus 检查端口是否可被新入站使用：空闲，或已被当前配置中的入站占用。
-func (m *Manager) PortStatus(port int) protocol.ProbePortResult {
-	if ln, err := net.Listen("tcp", ":"+strconv.Itoa(port)); err == nil {
+// network 为 udp 时检查 UDP 端口（Hysteria2），否则检查 TCP 端口。
+func (m *Manager) PortStatus(port int, network string) protocol.ProbePortResult {
+	addr := ":" + strconv.Itoa(port)
+	if network == "udp" {
+		if pc, err := net.ListenPacket("udp", addr); err == nil {
+			pc.Close()
+			return protocol.ProbePortResult{Free: true}
+		}
+	} else if ln, err := net.Listen("tcp", addr); err == nil {
 		ln.Close()
 		return protocol.ProbePortResult{Free: true}
 	}
