@@ -7,7 +7,7 @@ import AddrListEditor from './AddrListEditor.vue'
 import { datetime } from '../lib/format'
 import { PRESETS, presetOf, type Preset } from '../lib/presets'
 
-// 新建或编辑入站：按协议组合显示 Reality / TLS / 传输 / Shadowsocks 参数区块。
+// 新建或编辑入站：按协议组合显示 Reality / TLS / 传输 / Shadowsocks / Hysteria2 参数区块。
 const props = defineProps<{ inbound: InboundItem | null; nodes: NodeItem[] }>()
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ saved: [] }>()
@@ -33,7 +33,11 @@ function riskySNI(sn: string) {
 }
 
 function randomPath() {
-  return '/' + Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, '0')).join('')
+  return '/' + randomHex(6)
+}
+
+function randomHex(bytes: number) {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 /** 表单持有全部区块的参数，切换组合时互不丢失；保存时后端只保留当前组合需要的部分。 */
@@ -47,6 +51,7 @@ function blankSpec() {
     ws: { path: randomPath(), host: '' },
     xhttp: { path: randomPath(), host: '', mode: 'auto' },
     ss: { method: SS_METHODS[0], serverKey: '' },
+    hysteria: { obfsPassword: '' },
     sniffing: true,
   }
 }
@@ -73,6 +78,7 @@ const preset = computed<Preset>(() => PRESETS.find((p) => p.key === form.preset)
 const isReality = computed(() => preset.value.security === 'reality')
 const isTLS = computed(() => preset.value.security === 'tls')
 const isSS = computed(() => preset.value.protocol === 'shadowsocks')
+const isHy = computed(() => preset.value.protocol === 'hysteria')
 const nodeOptions = computed(() => props.nodes.map((n) => ({ value: n.id, label: n.name, online: n.runtime.online })))
 const nodeOnline = computed(() => props.nodes.find((n) => n.id === form.nodeId)?.runtime.online ?? false)
 const targetOptions = computed(() => TARGETS.map((t) => ({ value: `${t}:443` })))
@@ -80,6 +86,11 @@ const risky = computed(() => form.spec.reality.serverNames.filter(riskySNI))
 const compat = computed({
   get: () => !!form.spec.reality.minClientVer,
   set: (v) => (form.spec.reality.minClientVer = v ? COMPAT_CLIENT_VER : ''),
+})
+// Hysteria2 的 Salamander 混淆：开启时生成随机密码，关闭时清空（密码为空即不混淆）。
+const obfs = computed({
+  get: () => !!form.spec.hysteria.obfsPassword,
+  set: (v) => (form.spec.hysteria.obfsPassword = v ? randomHex(16) : ''),
 })
 const presetOptions = computed(() => PRESETS.map((p) => ({ value: p.key, label: p.label, hint: p.hint })))
 
@@ -152,7 +163,7 @@ watch(open, async (v) => {
     Object.assign(form, {
       nodeId: src.nodeId, remark: src.remark, enabled: src.enabled, listen: src.listen, port: src.port,
       linkAddrs: (src.linkAddrs ?? []).map((a) => ({ ...a })), preset: presetOf(src)?.key ?? PRESETS[0].key,
-      spec: { ...base, ...spec, vless: spec.vless ?? base.vless, reality: spec.reality ?? base.reality, tls: spec.tls ?? base.tls, ws: spec.ws ?? base.ws, xhttp: spec.xhttp ?? base.xhttp, ss: spec.ss ?? base.ss },
+      spec: { ...base, ...spec, vless: spec.vless ?? base.vless, reality: spec.reality ?? base.reality, tls: spec.tls ?? base.tls, ws: spec.ws ?? base.ws, xhttp: spec.xhttp ?? base.xhttp, ss: spec.ss ?? base.ss, hysteria: { ...base.hysteria, ...spec.hysteria } },
     })
     return
   }
@@ -245,7 +256,7 @@ async function save() {
           </a-form-item>
         </div>
         <div class="row">
-          <a-form-item label="端口" required :extra="isSS ? '' : '推荐 443；被占用时会在保存前提示。'">
+          <a-form-item label="端口" required :extra="isHy ? 'Hysteria2 监听 UDP 端口，需在防火墙与云服务商安全组中放行 UDP。' : isSS ? '' : '推荐 443；被占用时会在保存前提示。'">
             <a-input-number v-model:value="form.port" :min="1" :max="65535" class="full mono">
               <template #addonAfter>
                 <a-tooltip title="随机端口"><Dice5 :size="15" class="click" @click="randomPort" /></a-tooltip>
@@ -313,7 +324,7 @@ async function save() {
 
       <section v-if="isTLS" class="sec">
         <h4>TLS</h4>
-        <a-form-item label="域名" required extra="证书对应的域名，也是客户端连接时的 SNI。套 CDN 时填写 CDN 上的域名。">
+        <a-form-item label="域名" required :extra="isHy ? '证书对应的域名，也是客户端连接时的 SNI。Hysteria2 基于 UDP，不能套 CDN，域名需直接解析到服务器。' : '证书对应的域名，也是客户端连接时的 SNI。套 CDN 时填写 CDN 上的域名。'">
           <a-input v-model:value="form.spec.tls.serverName" class="mono" placeholder="node.example.com" />
         </a-form-item>
         <a-form-item label="证书来源">
@@ -345,7 +356,7 @@ async function save() {
             </div>
           </a-form-item>
         </template>
-        <div class="row">
+        <div v-if="!isHy" class="row">
           <a-form-item label="ALPN">
             <a-checkbox-group v-model:value="form.spec.tls.alpn" :options="['h2', 'http/1.1']" />
           </a-form-item>
@@ -397,6 +408,19 @@ async function save() {
           <div class="inline">
             <a-input v-model:value="form.spec.ss.serverKey" class="grow mono" />
             <a-button @click="genSSKey"><KeyRound :size="15" class="ico" />重新生成</a-button>
+          </div>
+        </a-form-item>
+      </section>
+
+      <section v-if="isHy" class="sec">
+        <h4>Hysteria2</h4>
+        <a-form-item label="Salamander 混淆" extra="把 QUIC 数据包混淆为随机字节，可应对运营商针对 UDP / HTTP/3 的限速；开启后不再像普通 HTTP/3 网站。订阅中已自动携带混淆密码。">
+          <a-switch v-model:checked="obfs" />
+        </a-form-item>
+        <a-form-item v-if="obfs" label="混淆密码" required>
+          <div class="inline">
+            <a-input v-model:value="form.spec.hysteria.obfsPassword" class="grow mono" />
+            <a-button @click="form.spec.hysteria.obfsPassword = randomHex(16)"><KeyRound :size="15" class="ico" />重新生成</a-button>
           </div>
         </a-form-item>
       </section>

@@ -225,7 +225,7 @@ export interface TLSSpec {
 }
 
 export interface InboundSpec {
-  network: 'tcp' | 'ws' | 'xhttp'
+  network: 'tcp' | 'ws' | 'xhttp' | 'hysteria'
   security: 'reality' | 'tls' | 'none'
   vless?: { flow: string }
   reality?: RealitySpec
@@ -233,6 +233,7 @@ export interface InboundSpec {
   ws?: { path: string; host: string }
   xhttp?: { path: string; host: string; mode: string }
   ss?: { method: string; serverKey: string }
+  hysteria?: { obfsPassword?: string }
   sniffing: boolean
 }
 
@@ -251,7 +252,7 @@ export interface InboundItem {
   enabled: boolean
   listen: string
   port: number
-  protocol: 'vless' | 'vmess' | 'trojan' | 'shadowsocks'
+  protocol: 'vless' | 'vmess' | 'trojan' | 'shadowsocks' | 'hysteria'
   spec: InboundSpec
   linkAddrs: LinkAddr[]
   createdAt: number
