@@ -20,13 +20,16 @@ const (
 	ProtoVMess  = "vmess"
 	ProtoTrojan = "trojan"
 	ProtoSS     = "shadowsocks"
+	// ProtoHysteria 为 Xray 的 hysteria 入站，固定使用 Hysteria2（version 2）。
+	ProtoHysteria = "hysteria"
 )
 
 // 传输层。
 const (
-	NetworkTCP   = "tcp"
-	NetworkWS    = "ws"
-	NetworkXHTTP = "xhttp"
+	NetworkTCP      = "tcp"
+	NetworkWS       = "ws"
+	NetworkXHTTP    = "xhttp"
+	NetworkHysteria = "hysteria" // 基于 QUIC（UDP）
 )
 
 // 安全层。
@@ -60,25 +63,27 @@ var Fingerprints = []string{"chrome", "firefox", "safari", "ios", "android", "ed
 
 // combos 为支持的协议组合：protocol / network / security。
 var combos = map[[3]string]bool{
-	{ProtoVLESS, NetworkTCP, SecurityReality}:   true,
-	{ProtoVLESS, NetworkXHTTP, SecurityReality}: true,
-	{ProtoVLESS, NetworkWS, SecurityTLS}:        true,
-	{ProtoVMess, NetworkWS, SecurityTLS}:        true,
-	{ProtoTrojan, NetworkTCP, SecurityTLS}:      true,
-	{ProtoSS, NetworkTCP, SecurityNone}:         true,
+	{ProtoVLESS, NetworkTCP, SecurityReality}:     true,
+	{ProtoVLESS, NetworkXHTTP, SecurityReality}:   true,
+	{ProtoVLESS, NetworkWS, SecurityTLS}:          true,
+	{ProtoVMess, NetworkWS, SecurityTLS}:          true,
+	{ProtoTrojan, NetworkTCP, SecurityTLS}:        true,
+	{ProtoSS, NetworkTCP, SecurityNone}:           true,
+	{ProtoHysteria, NetworkHysteria, SecurityTLS}: true,
 }
 
 // Spec 为入站的协议参数，按 protocol / network / security 组合取用对应字段。
 type Spec struct {
-	Network  string   `json:"network"`
-	Security string   `json:"security"`
-	VLESS    *VLESS   `json:"vless,omitempty"`
-	SS       *SS      `json:"ss,omitempty"`
-	Reality  *Reality `json:"reality,omitempty"`
-	TLS      *TLS     `json:"tls,omitempty"`
-	WS       *WS      `json:"ws,omitempty"`
-	XHTTP    *XHTTP   `json:"xhttp,omitempty"`
-	Sniffing bool     `json:"sniffing"`
+	Network  string    `json:"network"`
+	Security string    `json:"security"`
+	VLESS    *VLESS    `json:"vless,omitempty"`
+	SS       *SS       `json:"ss,omitempty"`
+	Hysteria *Hysteria `json:"hysteria,omitempty"`
+	Reality  *Reality  `json:"reality,omitempty"`
+	TLS      *TLS      `json:"tls,omitempty"`
+	WS       *WS       `json:"ws,omitempty"`
+	XHTTP    *XHTTP    `json:"xhttp,omitempty"`
+	Sniffing bool      `json:"sniffing"`
 }
 
 // VLESS 为 VLESS 协议参数。
@@ -90,6 +95,11 @@ type VLESS struct {
 type SS struct {
 	Method    string `json:"method"`
 	ServerKey string `json:"serverKey"`
+}
+
+// Hysteria 为 Hysteria2 参数。ObfsPassword 非空时启用 Salamander 混淆，客户端需填写相同密码。
+type Hysteria struct {
+	ObfsPassword string `json:"obfsPassword,omitempty"`
 }
 
 // Reality 为 Reality 安全层参数。PublicKey 由 PrivateKey 派生，仅用于生成链接。
@@ -134,6 +144,8 @@ var (
 	clientVerRe = regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}$`)
 	hostnameRe  = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
 	pathRe      = regexp.MustCompile(`^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$`)
+	// obfsPasswordRe 限制为 URL 非保留字符，避免分享链接与各客户端解析差异。
+	obfsPasswordRe = regexp.MustCompile(`^[A-Za-z0-9._~-]*$`)
 )
 
 // ParseSpec 解析并校验入站参数，返回规范化后的结构。
@@ -177,6 +189,16 @@ func (s *Spec) Validate(protocol string) error {
 	} else {
 		s.SS = nil
 	}
+	if protocol == ProtoHysteria {
+		if s.Hysteria == nil {
+			s.Hysteria = &Hysteria{}
+		}
+		if err := s.Hysteria.validate(); err != nil {
+			return err
+		}
+	} else {
+		s.Hysteria = nil
+	}
 
 	switch s.Security {
 	case SecurityReality:
@@ -192,7 +214,7 @@ func (s *Spec) Validate(protocol string) error {
 		if s.TLS == nil {
 			return errors.New("缺少 TLS 参数")
 		}
-		if err := s.TLS.validate(); err != nil {
+		if err := s.TLS.validate(protocol == ProtoHysteria); err != nil {
 			return err
 		}
 	default:
@@ -255,7 +277,9 @@ func (s *SS) validate() error {
 	return nil
 }
 
-func (t *TLS) validate() error {
+// validate 校验 TLS 参数。quic 为 true 时（Hysteria2）ALPN 固定为 h3：Xray 未配置 ALPN 时
+// 默认只协商 h2 / http/1.1，QUIC 握手会失败；QUIC 客户端也不支持 uTLS 指纹，因此清空指纹。
+func (t *TLS) validate(quic bool) error {
 	t.ServerName = strings.TrimSpace(t.ServerName)
 	if !hostnameRe.MatchString(t.ServerName) || !strings.Contains(t.ServerName, ".") {
 		return errors.New("TLS 需要填写证书对应的域名")
@@ -271,6 +295,10 @@ func (t *TLS) validate() error {
 	default:
 		return fmt.Errorf("未知的证书来源：%s", t.CertMode)
 	}
+	if quic {
+		t.ALPN, t.Fingerprint = []string{"h3"}, ""
+		return nil
+	}
 	t.ALPN = cleanList(t.ALPN)
 	for _, a := range t.ALPN {
 		if a != "h2" && a != "http/1.1" {
@@ -282,6 +310,15 @@ func (t *TLS) validate() error {
 	}
 	if !slices.Contains(Fingerprints, t.Fingerprint) {
 		return fmt.Errorf("不支持的指纹：%s", t.Fingerprint)
+	}
+	return nil
+}
+
+// validate 校验混淆密码：会写入分享链接与客户端配置，限制为不含空白的可见字符。
+func (h *Hysteria) validate() error {
+	h.ObfsPassword = strings.TrimSpace(h.ObfsPassword)
+	if len(h.ObfsPassword) > 128 || !obfsPasswordRe.MatchString(h.ObfsPassword) {
+		return errors.New("混淆密码只能包含字母、数字与 -_.~，且不超过 128 位")
 	}
 	return nil
 }

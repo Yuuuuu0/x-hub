@@ -65,6 +65,16 @@ func ShareLink(protocol string, s *Spec, t LinkTarget, cred Credential) string {
 	case ProtoSS:
 		user := base64.RawURLEncoding.EncodeToString([]byte(s.SS.Method + ":" + ssPassword(s, cred)))
 		return "ss://" + user + "@" + addr + "#" + url.PathEscape(t.Name)
+	case ProtoHysteria:
+		// 客户端未指定 ALPN 时默认使用 h3，与服务端一致，链接中无需携带。
+		q := url.Values{}
+		q.Set("sni", c.sni)
+		if p := s.Hysteria.ObfsPassword; p != "" {
+			q.Set("obfs", "salamander")
+			q.Set("obfs-password", p)
+		}
+		u := url.URL{Scheme: "hysteria2", User: url.User(cred.Password), Host: addr, Path: "/", RawQuery: q.Encode(), Fragment: t.Name}
+		return u.String()
 	}
 
 	q := url.Values{}
@@ -118,6 +128,8 @@ type MihomoProxy struct {
 	UDP               bool         `yaml:"udp"`
 	TLS               bool         `yaml:"tls,omitempty"`
 	Flow              string       `yaml:"flow,omitempty"`
+	Obfs              string       `yaml:"obfs,omitempty"`
+	ObfsPassword      string       `yaml:"obfs-password,omitempty"`
 	ServerName        string       `yaml:"servername,omitempty"`
 	SNI               string       `yaml:"sni,omitempty"`
 	ALPN              []string     `yaml:"alpn,omitempty"`
@@ -162,6 +174,12 @@ func Mihomo(protocol string, s *Spec, t LinkTarget, cred Credential) MihomoProxy
 	case ProtoSS:
 		p.Type, p.Cipher, p.Password = "ss", s.SS.Method, ssPassword(s, cred)
 		return p
+	case ProtoHysteria:
+		p.Type, p.Password, p.SNI = "hysteria2", cred.Password, c.sni
+		if pw := s.Hysteria.ObfsPassword; pw != "" {
+			p.Obfs, p.ObfsPassword = "salamander", pw
+		}
+		return p
 	}
 	if protocol == ProtoTrojan {
 		p.SNI = c.sni // Mihomo 的 trojan 使用 sni 字段
@@ -205,6 +223,14 @@ func SingBox(protocol string, s *Spec, t LinkTarget, cred Credential) (map[strin
 		o["password"] = cred.Password
 	case ProtoSS:
 		o["method"], o["password"] = s.SS.Method, ssPassword(s, cred)
+		return o, true
+	case ProtoHysteria:
+		// sing-box 的 QUIC 不支持 uTLS，ALPN 缺省即为 h3。
+		o["type"], o["password"] = "hysteria2", cred.Password
+		if pw := s.Hysteria.ObfsPassword; pw != "" {
+			o["obfs"] = map[string]any{"type": "salamander", "password": pw}
+		}
+		o["tls"] = map[string]any{"enabled": true, "server_name": c.sni}
 		return o, true
 	}
 	tls := map[string]any{

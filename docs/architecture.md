@@ -152,6 +152,7 @@ Inbound
 - VLESS + XHTTP + Reality（sing-box 不支持 XHTTP，sing-box 订阅不输出该类节点）
 - VLESS / VMess + WS + TLS（Xray 已将 VMess 标记为弃用，表单中注明）
 - Trojan + TLS
+- Hysteria2（Xray `hysteria` 入站，version 2；TLS 固定 ALPN `h3`，可选 Salamander 混淆，经 `finalmask.udp` 下发；监听 UDP 端口，保存前按 UDP 检查端口占用；需要 Xray v26.3.27 及以上，v26.2.6 及更早版本不识别 `hysteria` 入站，服务器上报的版本过低时拒绝保存）
 - Shadowsocks 2022（Xray 多用户仅支持 `2022-blake3-aes-128-gcm` / `256-gcm`）
 
 **节点证书**（TLS 类入站）
@@ -177,6 +178,7 @@ Inbound
 - 凭据由 `secret` 确定性派生，无需"订阅×入站"凭据表：
   - VLESS / VMess：订阅 `uuid`
   - Trojan：`HMAC-SHA256(secret, "trojan")` 取前 32 位十六进制
+  - Hysteria2：`HMAC-SHA256(secret, "hysteria2")` 取前 32 位十六进制，作为 Xray 客户端的 `auth`
   - SS2022：`HKDF-SHA256(secret, info="ss2022:<inbound_id>")`，按 method 取 16 / 32 字节；客户端密码为 `服务端密钥:用户密钥`
 - SS2022 入站没有任何有效订阅时，写入由服务端密钥派生的占位用户：Xray 在无用户时会退化为单用户模式，仅凭服务端密钥即可连接，占位用户可防止已移除的订阅继续使用（已实测）。
 - Xray client email 统一为 `s{subId}.i{inboundId}`，统计天然细到"订阅 × 入站"。

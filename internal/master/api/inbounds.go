@@ -16,6 +16,7 @@ import (
 	"github.com/Yuuuuu0/x-hub/internal/master/store"
 	"github.com/Yuuuuu0/x-hub/internal/master/sub"
 	"github.com/Yuuuuu0/x-hub/internal/shared/protocol"
+	"github.com/Yuuuuu0/x-hub/internal/shared/xraycap"
 )
 
 // inboundView 为入站列表项，附带所属服务器名称与分享用的公钥等派生信息。
@@ -145,21 +146,42 @@ func checkListenFamily(n *store.Node, in *store.Inbound) error {
 	return nil
 }
 
-// checkPort 在服务器在线时确认端口未被其他程序占用；离线时跳过，由下发时的配置校验兜底。
-func (h *Handler) checkPort(ctx context.Context, nodeID int64, port int) error {
-	if !h.Hub.State(nodeID).Online {
+// checkXrayVersion 拒绝在 Xray 版本过低的服务器上使用 Hysteria2：旧版无法解析 hysteria 入站，
+// 整台服务器的配置都会校验失败。版本未知（尚未安装或未上报）时不拦截。
+func checkXrayVersion(n *store.Node, in *store.Inbound) error {
+	if in.Protocol != model.ProtoHysteria {
+		return nil
+	}
+	if v, ok := xraycap.ParseVersion(n.XrayVersion); ok && v.Compare(xraycap.HysteriaInboundSince) < 0 {
+		return fmt.Errorf("Hysteria2 需要 Xray %s 及以上，该服务器当前为 %s，请先升级 Xray", xraycap.HysteriaInboundSince, v)
+	}
+	return nil
+}
+
+// checkPort 在服务器在线时确认入站端口未被其他程序占用（Hysteria2 检查 UDP，其余检查 TCP）；
+// 离线时跳过，由下发时的配置校验兜底。
+func (h *Handler) checkPort(ctx context.Context, in *store.Inbound) error {
+	if !h.Hub.State(in.NodeID).Online {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var res protocol.ProbePortResult
-	if err := h.Hub.Request(ctx, nodeID, protocol.TypeProbe, protocol.ProbeRequest{Kind: protocol.ProbePort, Port: port}, &res); err != nil {
+	if err := h.Hub.Request(ctx, in.NodeID, protocol.TypeProbe, protocol.ProbeRequest{Kind: protocol.ProbePort, Port: in.Port, Network: portNetwork(in.Protocol)}, &res); err != nil {
 		return nil // 旧版被控端不支持探测时不阻塞保存
 	}
 	if !res.Free && !res.Owned {
-		return fmt.Errorf("端口 %d 已被服务器上的其他程序占用", port)
+		return fmt.Errorf("端口 %d 已被服务器上的其他程序占用", in.Port)
 	}
 	return nil
+}
+
+// portNetwork 返回入站监听端口所用的传输协议：Hysteria2 基于 QUIC 监听 UDP，其余为 TCP。
+func portNetwork(proto string) string {
+	if proto == model.ProtoHysteria {
+		return "udp"
+	}
+	return "tcp"
 }
 
 func (h *Handler) createInbound(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +204,11 @@ func (h *Handler) createInbound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.checkPort(r.Context(), in.NodeID, in.Port); err != nil {
+	if err := checkXrayVersion(node, in); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.checkPort(r.Context(), in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -227,9 +253,13 @@ func (h *Handler) updateInbound(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if err := checkXrayVersion(node, in); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if in.Port != old.Port {
-		if err := h.checkPort(r.Context(), in.NodeID, in.Port); err != nil {
+		if err := h.checkPort(r.Context(), in); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

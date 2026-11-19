@@ -28,6 +28,74 @@ func ssSpec() *Spec {
 	return &Spec{Network: NetworkTCP, Security: SecurityNone, SS: &SS{Method: "2022-blake3-aes-128-gcm", ServerKey: key}}
 }
 
+func hySpec(obfs string) *Spec {
+	return &Spec{Network: NetworkHysteria, Security: SecurityTLS, Hysteria: &Hysteria{ObfsPassword: obfs},
+		TLS: &TLS{ServerName: "hy.example.com", CertMode: CertACME, ALPN: []string{"h2"}, Fingerprint: "chrome"}}
+}
+
+func TestHysteria(t *testing.T) {
+	s := hySpec(" obfs-pw ")
+	if err := s.Validate(ProtoHysteria); err != nil {
+		t.Fatal(err)
+	}
+	if s.Hysteria.ObfsPassword != "obfs-pw" || len(s.TLS.ALPN) != 1 || s.TLS.ALPN[0] != "h3" || s.TLS.Fingerprint != "" {
+		t.Fatalf("not normalized: %+v %+v", s.Hysteria, s.TLS)
+	}
+	// 已保存的规范化参数再次校验（编译、生成订阅时）必须通过。
+	if err := s.Validate(ProtoHysteria); err != nil {
+		t.Fatalf("revalidate: %v", err)
+	}
+	if err := hySpec("a b").Validate(ProtoHysteria); err == nil {
+		t.Error("obfs password with spaces must be rejected")
+	}
+	if err := hySpec("").Validate(ProtoTrojan); err == nil {
+		t.Error("trojan over hysteria transport must be rejected")
+	}
+	noTLS := hySpec("")
+	noTLS.TLS = nil
+	if err := noTLS.Validate(ProtoHysteria); err == nil {
+		t.Error("hysteria requires tls")
+	}
+
+	cred := CredentialFor(ProtoHysteria, s, "u", "secret", 3)
+	if len(cred.Password) != 32 || cred == CredentialFor(ProtoHysteria, s, "u", "other", 3) || cred == CredentialFor(ProtoTrojan, nil, "u", "secret", 3) {
+		t.Fatalf("hysteria credential: %+v", cred)
+	}
+
+	b, _ := json.Marshal(XrayInbound(3, "", 443, ProtoHysteria, s, []Client{{Email: "s1.i3", Cred: cred}}))
+	for _, want := range []string{`"protocol":"hysteria"`, `"version":2`, `"auth":"` + cred.Password + `"`, `"network":"hysteria"`,
+		`"hysteriaSettings":{"version":2}`, `"alpn":["h3"]`, `"udp":[{"settings":{"password":"obfs-pw"},"type":"salamander"}]`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("hysteria inbound missing %s: %s", want, b)
+		}
+	}
+	plain := hySpec("")
+	plain.Validate(ProtoHysteria)
+	if b, _ := json.Marshal(XrayInbound(3, "", 443, ProtoHysteria, plain, nil)); strings.Contains(string(b), "finalmask") {
+		t.Errorf("finalmask must be omitted without obfs: %s", b)
+	}
+
+	target := LinkTarget{Host: "2001:db8::1", Port: 443, Name: "东京 01"}
+	u, err := url.Parse(ShareLink(ProtoHysteria, s, target, cred))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	if u.Scheme != "hysteria2" || u.User.Username() != cred.Password || u.Host != "[2001:db8::1]:443" || u.Fragment != "东京 01" ||
+		q.Get("sni") != "hy.example.com" || q.Get("obfs") != "salamander" || q.Get("obfs-password") != "obfs-pw" {
+		t.Fatalf("hysteria2 link: %s", u)
+	}
+	if m := Mihomo(ProtoHysteria, s, target, cred); m.Type != "hysteria2" || m.Password != cred.Password || m.SNI != "hy.example.com" ||
+		m.Obfs != "salamander" || m.ObfsPassword != "obfs-pw" || m.TLS || m.ClientFingerprint != "" {
+		t.Fatalf("mihomo hysteria2: %+v", m)
+	}
+	sb, ok := SingBox(ProtoHysteria, s, target, cred)
+	tls, _ := sb["tls"].(map[string]any)
+	if !ok || sb["type"] != "hysteria2" || sb["password"] != cred.Password || tls["server_name"] != "hy.example.com" || tls["utls"] != nil || sb["obfs"] == nil {
+		t.Fatalf("sing-box hysteria2: %v", sb)
+	}
+}
+
 func TestValidateNormalizes(t *testing.T) {
 	s := realitySpec()
 	if err := s.Validate(ProtoVLESS); err != nil {

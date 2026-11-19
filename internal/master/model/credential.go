@@ -9,7 +9,7 @@ import (
 	"strconv"
 )
 
-// Credential 为订阅在某入站上的连接凭据：UUID 用于 VLESS / VMess，Password 用于 Trojan / SS2022。
+// Credential 为订阅在某入站上的连接凭据：UUID 用于 VLESS / VMess，Password 用于 Trojan / SS2022 / Hysteria2。
 type Credential struct {
 	UUID     string
 	Password string
@@ -19,14 +19,21 @@ type Credential struct {
 func CredentialFor(protocol string, s *Spec, subUUID, subSecret string, inboundID int64) Credential {
 	switch protocol {
 	case ProtoTrojan:
-		mac := hmac.New(sha256.New, []byte(subSecret))
-		mac.Write([]byte("trojan"))
-		return Credential{Password: hex.EncodeToString(mac.Sum(nil))[:32]}
+		return Credential{Password: hmacHex(subSecret, "trojan")}
+	case ProtoHysteria:
+		return Credential{Password: hmacHex(subSecret, "hysteria2")}
 	case ProtoSS:
 		return Credential{Password: deriveKey(subSecret, "ss2022:"+strconv.FormatInt(inboundID, 10), SS2022Methods[s.SS.Method])}
 	default:
 		return Credential{UUID: subUUID}
 	}
+}
+
+// hmacHex 返回 HMAC-SHA256(secret, info) 的前 32 位十六进制。
+func hmacHex(secret, info string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(info))
+	return hex.EncodeToString(mac.Sum(nil))[:32]
 }
 
 // deriveKey 用 HKDF-SHA256 派生 n 字节密钥并以 base64 编码。

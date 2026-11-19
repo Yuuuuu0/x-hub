@@ -22,6 +22,8 @@ func XrayInbound(id int64, listen string, port int, protocol string, s *Spec, cl
 			cs = append(cs, map[string]any{"id": c.Cred.UUID, "email": c.Email})
 		case ProtoTrojan, ProtoSS:
 			cs = append(cs, map[string]any{"password": c.Cred.Password, "email": c.Email})
+		case ProtoHysteria:
+			cs = append(cs, map[string]any{"auth": c.Cred.Password, "email": c.Email})
 		}
 	}
 	settings := map[string]any{"clients": cs}
@@ -30,6 +32,8 @@ func XrayInbound(id int64, listen string, port int, protocol string, s *Spec, cl
 		settings["decryption"] = "none"
 	case ProtoSS:
 		settings["method"], settings["password"], settings["network"] = s.SS.Method, s.SS.ServerKey, "tcp,udp"
+	case ProtoHysteria:
+		settings["version"] = 2
 	}
 
 	stream := map[string]any{"network": s.Network, "security": s.Security}
@@ -73,6 +77,11 @@ func XrayInbound(id int64, listen string, port int, protocol string, s *Spec, cl
 			x["host"] = s.XHTTP.Host
 		}
 		stream["xhttpSettings"] = x
+	case NetworkHysteria:
+		stream["hysteriaSettings"] = map[string]any{"version": 2}
+		if p := s.Hysteria.ObfsPassword; p != "" {
+			stream["finalmask"] = map[string]any{"udp": []any{map[string]any{"type": "salamander", "settings": map[string]any{"password": p}}}}
+		}
 	}
 
 	in := map[string]any{

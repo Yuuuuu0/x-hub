@@ -45,6 +45,9 @@ func (v Version) String() string {
 	return fmt.Sprintf("v%d.%d.%d", v.Major, v.Minor, v.Patch)
 }
 
+// HysteriaInboundSince 为支持 hysteria 入站的最低 Xray 版本（实测 v26.2.6 报 unknown config id: hysteria）。
+var HysteriaInboundSince = Version{Major: 26, Minor: 3, Patch: 27}
+
 // IsValidTag 判断字符串是否为合法的 Xray 发布标签，用于防止路径注入。
 func IsValidTag(tag string) bool {
 	return len(tag) > 0 && tag[0] == 'v' && versionRe.MatchString(tag)

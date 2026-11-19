@@ -26,7 +26,7 @@ x-hub 适合**自己用、顺便分给亲友**的场景：
 - 一键启停、重启、切换或批量升级 Xray，可锁定版本；新版本启动失败自动回滚
 
 **节点（入站）**
-- 支持 VLESS + Reality + Vision、VLESS + XHTTP + Reality、VLESS / VMess + WS + TLS、Trojan + TLS、Shadowsocks 2022
+- 支持 VLESS + Reality + Vision、VLESS + XHTTP + Reality、VLESS / VMess + WS + TLS、Trojan + TLS、Hysteria2（可选 Salamander 混淆）、Shadowsocks 2022
 - 密钥、ShortID 一键生成；Reality 伪装目标可以从服务器本机实测是否可用
 - TLS 证书可以用节点上已有的证书文件，也可以由被控端通过 Cloudflare DNS 自动申请、自动续签
 - 可单独指定连接地址（CDN 域名、优选 IP、端口转发），同样支持多个
