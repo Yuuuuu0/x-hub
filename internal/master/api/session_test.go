@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,29 +35,17 @@ func TestLoginWithTOTP(t *testing.T) {
 	if rec, out := postLogin(h, map[string]string{"username": "admin", "password": "pass1234"}); rec.Code != 401 || out["needTotp"] != true {
 		t.Fatalf("missing code: %d %v", rec.Code, out)
 	}
-	if rec, _ := postLogin(h, map[string]string{"username": "admin", "password": "pass1234", "code": "000000"}); rec.Code != 401 {
+	wrong := "000000"
+	for i := 0; auth.VerifyTOTP(secret, wrong, time.Now()); i++ {
+		wrong = fmt.Sprintf("%06d", i+1)
+	}
+	if rec, _ := postLogin(h, map[string]string{"username": "admin", "password": "pass1234", "code": wrong}); rec.Code != 401 {
 		t.Fatalf("wrong code accepted: %d", rec.Code)
 	}
-	code := totpNow(t, secret)
+	code := auth.TOTPCode(secret, time.Now())
 	if rec, _ := postLogin(h, map[string]string{"username": "admin", "password": "pass1234", "code": code}); rec.Code != 200 {
 		t.Fatalf("valid code rejected: %d %s", rec.Code, rec.Body.String())
 	}
-}
-
-// totpNow 暴力找出当前时间步可通过校验的验证码，避免在测试中复制算法实现。
-func totpNow(t *testing.T, secret string) string {
-	now := time.Now()
-	for i := 0; i < 1000000; i++ {
-		c := []byte("000000")
-		for j, v := 5, i; j >= 0; j, v = j-1, v/10 {
-			c[j] = byte('0' + v%10)
-		}
-		if auth.VerifyTOTP(secret, string(c), now) {
-			return string(c)
-		}
-	}
-	t.Fatal("no code found")
-	return ""
 }
 
 func TestBackup(t *testing.T) {

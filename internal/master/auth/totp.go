@@ -38,6 +38,15 @@ func totpCode(key []byte, step int64) string {
 	return fmt.Sprintf("%06d", v%1000000)
 }
 
+// TOTPCode 按 RFC 6238 计算 now 所在 30 秒时间步的 6 位验证码；secret 无效时返回空字符串。
+func TOTPCode(secret string, now time.Time) string {
+	key, err := totpEncoding.DecodeString(strings.ToUpper(strings.TrimSpace(secret)))
+	if err != nil {
+		return ""
+	}
+	return totpCode(key, now.Unix()/30)
+}
+
 // VerifyTOTP 校验验证码，允许前后各一个时间步的时钟偏差。
 func VerifyTOTP(secret, code string, now time.Time) bool {
 	key, err := totpEncoding.DecodeString(strings.ToUpper(strings.TrimSpace(secret)))

@@ -78,6 +78,9 @@ func TestTOTP(t *testing.T) {
 	secret := totpEncoding.EncodeToString([]byte("12345678901234567890"))
 	cases := map[int64]string{59: "287082", 1111111109: "081804", 1234567890: "005924", 2000000000: "279037"}
 	for ts, want := range cases {
+		if got := TOTPCode(secret, time.Unix(ts, 0)); got != want {
+			t.Errorf("t=%d got %s, want %s", ts, got, want)
+		}
 		if !VerifyTOTP(secret, want, time.Unix(ts, 0)) {
 			t.Errorf("t=%d code %s should verify", ts, want)
 		}
